@@ -3,6 +3,8 @@
 *.csv
 *.parquet
 *.duckdb
+data/
+GEIH_*/
 
 # Python
 __pycache__/
@@ -14,7 +16,3 @@ env/
 venv/
 .venv/
 ENV/
-*.egg-info/
-dist/
-build/
-.eggs/
