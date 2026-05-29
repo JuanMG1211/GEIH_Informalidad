@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/Juli/Desktop/Proyecto_Final_maestria/mlflow_geih/418150813951847250/2e7bb091373a422e9be6d57d2a1ff9c1/artifacts
+end_time: 1779946879345
+entry_point_name: ''
+experiment_id: '418150813951847250'
+lifecycle_stage: active
+run_id: 2e7bb091373a422e9be6d57d2a1ff9c1
+run_name: LR_baseline
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779946879230
+status: 3
+tags: []
+user_id: Juli

@@ -1,0 +1,16 @@
+creation_timestamp: 1779948380558
+current_stage: None
+deployment_job_state: null
+description: null
+last_updated_timestamp: 1779948380558
+model_id: m-54557859909a4f51b71da81e9d290ac2
+name: informality_geih_champion
+run_id: b78194942bee4dbbb358b32d97a03f29
+run_link: null
+source: models:/m-54557859909a4f51b71da81e9d290ac2
+status: READY
+status_message: null
+storage_location: file:///C:/Users/Juli/Desktop/Proyecto_Final_maestria/mlflow_geih/418150813951847250/models/m-54557859909a4f51b71da81e9d290ac2/artifacts
+user_id: null
+version: 2
+workspace: default

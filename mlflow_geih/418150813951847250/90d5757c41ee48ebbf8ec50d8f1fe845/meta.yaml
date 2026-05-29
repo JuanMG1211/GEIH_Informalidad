@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/Juli/Desktop/Proyecto_Final_maestria/mlflow_geih/418150813951847250/90d5757c41ee48ebbf8ec50d8f1fe845/artifacts
+end_time: 1779947105992
+entry_point_name: ''
+experiment_id: '418150813951847250'
+lifecycle_stage: active
+run_id: 90d5757c41ee48ebbf8ec50d8f1fe845
+run_name: LGB_optuna
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779947105885
+status: 3
+tags: []
+user_id: Juli

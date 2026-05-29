@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/Juli/Desktop/Proyecto_Final_maestria/mlflow_geih/418150813951847250/models/m-54557859909a4f51b71da81e9d290ac2/artifacts
+creation_timestamp: 1779948370749
+experiment_id: '418150813951847250'
+last_updated_timestamp: 1779948380507
+model_id: m-54557859909a4f51b71da81e9d290ac2
+model_type: null
+name: model
+source_run_id: b78194942bee4dbbb358b32d97a03f29
+status: 2
+status_message: null

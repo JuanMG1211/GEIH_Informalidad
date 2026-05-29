@@ -1,0 +1,23 @@
+artifact_path: file:///C:/Users/Juli/Desktop/Proyecto_Final_maestria/mlflow_geih/418150813951847250/models/m-e3fd5a60c6c14ccbb203a0f1f30c37ed/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.11.9
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.8.0
+    skops_trusted_types: null
+mlflow_version: 3.12.0
+model_id: m-e3fd5a60c6c14ccbb203a0f1f30c37ed
+model_size_bytes: 1116454
+model_uuid: m-e3fd5a60c6c14ccbb203a0f1f30c37ed
+prompts: null
+run_id: f959e06cad5442b09814c97f6cfc07d5
+utc_time_created: '2026-05-28 05:45:12.026483'

@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/Juli/Desktop/Proyecto_Final_maestria/mlflow_geih/418150813951847250/f959e06cad5442b09814c97f6cfc07d5/artifacts
+end_time: 1779947122375
+entry_point_name: ''
+experiment_id: '418150813951847250'
+lifecycle_stage: active
+run_id: f959e06cad5442b09814c97f6cfc07d5
+run_name: CHAMPION_LightGBM
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779947111649
+status: 3
+tags: []
+user_id: Juli
