@@ -439,86 +439,6 @@ with tab_dash:
             return f"rgb({max(30,v)},{max(30,v)},{max(30,v)})"
 
         # ═══════════════════════════════════════════════════════════
-        # ① TAMAÑO DEL ESTABLECIMIENTO
-        # ═══════════════════════════════════════════════════════════
-        st.divider()
-        st.markdown("### Trabajar solo o en microempresa es casi sinónimo de informalidad")
-        st.caption(
-            "Cuanto más pequeña la empresa, mayor la informalidad. "
-            "A partir de 20 trabajadores la tasa se reduce a la mitad."
-        )
-
-        LABELS_TAM = {
-            1: "Solo\n(1 persona)", 2: "Micro\n(2–5)", 3: "Pequeña\n(6–10)",
-            4: "11–19", 5: "20–30", 6: "31–50",
-            7: "51–100", 8: "101–200", 9: "201+", 10: "No sabe",
-        }
-        tasa_tam = (
-            df[df["P3069"].notna()]
-            .groupby("P3069", observed=True)
-            .apply(tasa_pond_grp, include_groups=False)
-            .reset_index().rename(columns={0: "tasa"}).sort_values("P3069")
-        )
-        tasa_tam["etiqueta"] = tasa_tam["P3069"].map(LABELS_TAM)
-        tasa_tam["pct"]      = tasa_tam["tasa"].round(1)
-        n_tam = len(tasa_tam)
-
-        # Solo etiqueta en barra más alta (idx 0) y "201+" (idx n-2)
-        tam_texts = [
-            f"<b>{v:.0f}%</b>" if i == 0 or i == n_tam - 2 else ""
-            for i, v in enumerate(tasa_tam["pct"])
-        ]
-
-        fig_tam = go.Figure(go.Bar(
-            x=tasa_tam["etiqueta"], y=tasa_tam["pct"],
-            marker_color=[NEGRO if p <= 3 else GRIS_C for p in tasa_tam["P3069"]],
-            text=tam_texts,
-            textposition="outside",
-            textfont=dict(size=22, family="Arial Black, Arial Bold, Arial", color="#111111"),
-        ))
-        fig_tam.add_hline(y=tasa_global, line_dash="dot",
-                          line_color="#888888", line_width=1.5,
-                          annotation_text=f"  promedio: {tasa_global:.0f}%",
-                          annotation_position="top left",
-                          annotation_font=dict(size=12, color="#666666"),
-                          annotation_bgcolor="white")
-        # Callout en la barra de máximo riesgo
-        max_idx = int(tasa_tam["pct"].idxmax())
-        fig_tam.add_annotation(
-            x=tasa_tam.loc[max_idx, "etiqueta"],
-            y=tasa_tam.loc[max_idx, "pct"] + 7,
-            text="<b>Máximo riesgo</b>",
-            showarrow=True, arrowhead=2, arrowsize=1.2,
-            arrowcolor=NEGRO, ax=80, ay=-28,
-            font=dict(size=12, color=NEGRO),
-            bgcolor="white", bordercolor=NEGRO, borderwidth=1, borderpad=5,
-        )
-        fig_tam.update_layout(
-            xaxis=dict(
-                tickfont=dict(size=14, family="Arial", color="#111111"),
-                showgrid=False, tickangle=0,
-            ),
-            yaxis=dict(
-                range=[0, 122], ticksuffix="%",
-                gridcolor="#F4F4F4", gridwidth=1, zeroline=False,
-                tickfont=dict(size=12, color="#777777"),
-            ),
-            plot_bgcolor="white", paper_bgcolor="white",
-            height=390, showlegend=False,
-            margin=dict(t=25, b=20, l=55, r=20),
-        )
-        st.plotly_chart(fig_tam, use_container_width=True, key="dash_tam")
-
-        pct_solo = float(tasa_tam.loc[tasa_tam["P3069"]==1, "pct"].values[0])
-        pct_grnd_vals = tasa_tam.loc[tasa_tam["P3069"]==9, "pct"].values
-        pct_grnd = float(pct_grnd_vals[0]) if len(pct_grnd_vals) else float(tasa_tam.iloc[-2]["pct"])
-        st.markdown(
-            f"> **Hallazgo:** Trabajar solo tiene una tasa de **{pct_solo:.0f}%** de informalidad. "
-            f"En empresas de 201+ cae a **{pct_grnd:.0f}%** "
-            f"— una diferencia de **{pct_solo-pct_grnd:.0f} puntos porcentuales**."
-        )
-
-        # ═══════════════════════════════════════════════════════════
         # ② EDUCACIÓN  +  ③ ZONA (como KPIs)
         # ═══════════════════════════════════════════════════════════
         st.divider()
@@ -693,10 +613,9 @@ with tab_dash:
         st.divider()
         st.markdown("### El riesgo de informalidad está determinado por condiciones estructurales")
         st.markdown(
-            "> Los cuatro factores anteriores — tamaño del establecimiento, educación, "
-            "zona geográfica y sector económico — explican sistemáticamente quién es informal "
-            "y quién no. La informalidad entre trabajadores independientes **no es una elección**: "
-            "es el resultado predecible de las condiciones en que se trabaja. "
+            "> La educación, la zona geográfica y el sector económico explican sistemáticamente "
+            "quién es informal y quién no. La informalidad entre trabajadores independientes "
+            "**no es una elección**: es el resultado predecible de las condiciones en que se trabaja. "
             "Intervenir sobre esas condiciones, en lugar de diseñar programas universales, "
             "aumentaría significativamente la efectividad de los programas de formalización."
         )
@@ -1092,13 +1011,13 @@ with tab_modelo:
 
     | Variable | Dirección del impacto | Importancia SHAP (referencial) |
     |---|---|---|
-    | Microempresa (≤10 empleados) | ↑ Mayor informalidad | **#1** |
-    | Años de educación | ↓ Reduce informalidad | **#2** |
-    | Departamento (enc.) | Varía por región | **#3** |
-    | Tamaño del establecimiento | ↓ Mayor empresa = menor riesgo | **#4** |
-    | Rama de actividad (enc.) | Varía por sector | **#5** |
-    | Edad | Curva no lineal (jóvenes y mayores) | **#6** |
-    | Horas / semana | ↓ Más horas = menor riesgo | **#7** |
+    | Años de educación | ↓ Reduce informalidad | **#1** |
+    | Departamento (enc.) | Varía por región | **#2** |
+    | Rama de actividad (enc.) | Varía por sector | **#3** |
+    | Edad | Curva no lineal (jóvenes y mayores más vulnerables) | **#4** |
+    | Horas / semana | ↓ Más horas = menor riesgo | **#5** |
+    | Zona (urbano/rural) | ↑ Rural = mayor riesgo | **#6** |
+    | Estado civil | Efecto social / responsabilidad familiar | **#7** |
 
     > Los valores SHAP exactos se actualizan al reentrenar el modelo con la nueva muestra de trabajadores independientes.
     """)
@@ -1252,15 +1171,14 @@ with tab_pred:
                 st.markdown("""
 | Factor | Dirección | Impacto relativo |
 |---|---|---|
-| Microempresa (≤ 10 trabajadores) | ↑ Mayor riesgo | ★★★★★ |
-| Años de educación bajos | ↑ Mayor riesgo | ★★★★☆ |
-| Zona rural | ↑ Mayor riesgo | ★★★☆☆ |
+| Años de educación bajos | ↑ Mayor riesgo | ★★★★★ |
+| Departamentos con alta informalidad estructural | ↑ Mayor riesgo | ★★★★☆ |
 | Sector agricultura / construcción / hogares | ↑ Mayor riesgo | ★★★☆☆ |
-| Departamentos con alta informalidad estructural | ↑ Mayor riesgo | ★★★☆☆ |
-| Más horas semanales trabajadas | ↓ Reduce riesgo | ★★☆☆☆ |
-| Empresa grande (> 30 empleados) | ↓ Reduce riesgo | ★★★★☆ |
-| Educación técnica / universitaria o más | ↓ Reduce riesgo | ★★★★☆ |
+| Zona rural | ↑ Mayor riesgo | ★★★☆☆ |
+| Pocas horas semanales (subempleo) | ↑ Mayor riesgo | ★★★☆☆ |
+| Educación técnica / universitaria o más | ↓ Reduce riesgo | ★★★★★ |
 | Zona cabecera municipal | ↓ Reduce riesgo | ★★★☆☆ |
+| Más horas semanales trabajadas | ↓ Reduce riesgo | ★★☆☆☆ |
                 """)
 
         except Exception as ex:
@@ -1278,25 +1196,25 @@ with st.expander("📌 Hallazgos clave y recomendaciones de política pública",
     with hall_col:
         st.markdown("#### 🔍 Hallazgos principales")
         st.markdown("""
-**1. Magnitud entre independientes:**
+**1. Magnitud:**
 ~85% de los trabajadores por cuenta propia en Colombia son informales (tasa ponderada DANE 2024).
 La formalidad entre independientes no es la norma — es la excepción.
 
 **2. La informalidad no es una elección:**
-El modelo muestra que el sector, el tamaño del establecimiento y la zona geográfica predicen la informalidad
-con AUC-ROC > 0.98. La "decisión" de ser informal está condicionada estructuralmente.
+El modelo (AUC-ROC 0.9853, F1 0.9576) muestra que el sector, la zona geográfica y la educación
+predicen la informalidad con alta precisión. La condición de informal está estructuralmente determinada.
 
 **3. Predictores dominantes (SHAP):**
-- Trabajar en microempresa (≤10 empleados) es el factor #1.
-- Cada año adicional de educación reduce significativamente el riesgo.
-- La geografía importa: departamentos como Vaupés y Vichada superan el 85%.
+- La educación es el factor modificable de mayor impacto: a más años, menor riesgo.
+- La geografía importa: departamentos como Vaupés y Chocó superan el 85%.
+- La rama de actividad define el contexto: agricultura, construcción y hogares concentran los perfiles más vulnerables.
 
-**4. Sectores críticos entre independientes:**
-Agricultura, construcción, hogares con servicio doméstico y comercio informal
-concentran las tasas más altas (>85%).
+**4. Sectores críticos:**
+Agricultura, construcción y hogares con servicio doméstico
+concentran las tasas más altas entre independientes (>85%).
 
 **5. Rendimiento del modelo:**
-LightGBM logra AUC-ROC ≥ 0.98 y F1 ≥ 0.95 — muy por encima de las metas (AUC ≥ 0.80, F1 ≥ 0.75).
+LightGBM logra AUC-ROC 0.9853 y F1 0.9576 — muy por encima de las metas (AUC ≥ 0.80, F1 ≥ 0.75).
         """)
 
     with rec_col:
@@ -1304,24 +1222,23 @@ LightGBM logra AUC-ROC ≥ 0.98 y F1 ≥ 0.95 — muy por encima de las metas (A
         st.markdown("""
 **Argumento central:**
 Los programas de formalización fallan cuando son universales.
-El modelo muestra que un independiente en microempresa rural agrícola tiene
-perfil completamente diferente al de uno urbano con educación técnica.
-Diseñar programas según ese perfil aumentaría su efectividad.
+Un independiente rural en el sector agrícola tiene un perfil completamente diferente
+al de uno urbano con educación técnica. Diseñar intervenciones según ese perfil
+aumentaría significativamente su efectividad.
 
 **Para el Ministerio del Trabajo:**
-- Usar el score de este modelo en operativos de inspección, priorizando
-  microempresas rurales de los sectores agrícola y de construcción.
+- Usar el score de este modelo para priorizar inspecciones laborales en zonas rurales
+  de los departamentos con tasa > 75%.
 - Escalar intervención por score: orientación (>40%), visita (>65%), acompañamiento activo (>80%).
 
 **Para el SENA:**
-- Focalizar programas de formalización en departamentos con tasa > 75%
-  y en independientes jóvenes (15-24 años) de zonas rurales.
-- Diseñar rutas específicas por sector (ej. construcción vs. comercio) en vez
-  de convocatorias abiertas.
+- Focalizar programas de formación técnica en independientes jóvenes (15-24 años) de zonas rurales.
+- Diseñar rutas específicas por sector (construcción, comercio, agricultura)
+  en lugar de convocatorias abiertas genéricas.
 
 **Para Planeación Nacional:**
-- Integrar el modelo en el FILCO (Ministerio del Trabajo) para pasar de
-  indicadores agregados departamentales a scores individuales.
+- Integrar el modelo en el FILCO para pasar de indicadores agregados
+  departamentales a scores individuales de riesgo.
 - Reentrenar con cada nueva ola anual de la GEIH para mantener vigencia.
         """)
 
