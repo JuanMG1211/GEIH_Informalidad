@@ -163,55 +163,6 @@ def compute_shap_beeswarm():
     except Exception:
         return None
 
-@st.cache_data(ttl=86400)
-def load_colombia_geojson():
-    """Descarga GeoJSON de departamentos de Colombia e inyecta códigos DANE en properties.DANE."""
-    import unicodedata, requests
-
-    def _norm(s):
-        return "".join(
-            c for c in unicodedata.normalize("NFD", str(s).lower())
-            if unicodedata.category(c) != "Mn"
-        ).strip()
-
-    # Lookup normalizado nombre → código DANE
-    lookup = {_norm(v[0]): k for k, v in DPTO_INFO.items()}
-    lookup.update({
-        "bogota d.c.": 11, "bogota dc": 11, "bogota": 11,
-        "norte de santander": 54, "n. de santander": 54, "n de santander": 54,
-        "san andres": 88, "san andres providencia y santa catalina": 88,
-        "narino": 52, "choco": 27, "vaupes": 97, "guainia": 94,
-        "valle del cauca": 76, "valle": 76,
-    })
-
-    urls = [
-        "https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/colombia-departments.geojson",
-        "https://raw.githubusercontent.com/marcovega/colombia-geojson/master/Colombia.geo.json",
-    ]
-    for url in urls:
-        try:
-            r = requests.get(url, timeout=12)
-            if r.status_code != 200:
-                continue
-            gj = r.json()
-            if len(gj.get("features", [])) < 20:
-                continue
-            for feat in gj["features"]:
-                props = feat.get("properties", {})
-                # Intenta con campos comunes de nombre
-                raw = (props.get("name") or props.get("NOMBRE_DPT")
-                       or props.get("NOM_DEP") or props.get("departamento") or "")
-                dane = lookup.get(_norm(raw))
-                if dane is None:
-                    # Intenta primer token del nombre
-                    first = _norm(raw).split()[0] if raw else ""
-                    dane = lookup.get(first)
-                feat["properties"]["DANE"] = dane
-            return gj
-        except Exception:
-            continue
-    return None
-
 # ── Helper: tasa ponderada ───────────────────────────────────────────────
 def tasa_pond_grp(g):
     return (g["INFORMAL"] * g["FEX_C18"]).sum() / g["FEX_C18"].sum() * 100
@@ -292,291 +243,6 @@ No repitas el perfil en la respuesta. Ve directo a las recomendaciones. Responde
     return response.choices[0].message.content
 
 
-# ── Gráfico: top 5 variables SHAP — cómo dividen la informalidad ─────────
-def build_shap_division_chart(df, tasa_global):
-    """5 subplots de línea que muestran la tasa de informalidad por categoría
-    de cada uno de los 5 predictores SHAP más importantes del modelo."""
-    LABELS_TAM = {1:"1", 2:"2-5", 3:"6-10", 4:"11-19", 5:"20-30",
-                  6:"31-50", 7:"51-100", 8:"101-200", 9:"201+", 10:"NS"}
-    LABELS_EDU = {1:"Ninguno", 2:"Preescol.", 3:"Prim.inc.", 4:"Primaria",
-                  5:"Sec.inc.", 6:"Sec.", 7:"Med.inc.", 8:"Media",
-                  9:"Técnica", 10:"Univers.", 11:"Espec.", 12:"Maestría", 13:"Doctor."}
-    LABELS_POS = {1:"Emp. particular", 2:"Emp. gobierno", 3:"Doméstico",
-                  4:"Cuenta propia", 5:"Empleador", 6:"Familiar s/rem.",
-                  7:"Jornalero", 8:"Otro"}
-
-    fig = make_subplots(
-        rows=2, cols=3,
-        subplot_titles=[
-            "① Tamaño del establecimiento",
-            "② Tipo de contrato",
-            "③ Posición ocupacional",
-            "④ Nivel educativo",
-            "⑤ Grupo de edad",
-            "",
-        ],
-        vertical_spacing=0.30,
-        horizontal_spacing=0.12,
-    )
-
-    def color_punto(v):
-        if v >= tasa_global + 8:
-            return "#C0392B"   # rojo — muy por encima del promedio
-        elif v >= tasa_global:
-            return "#E67E22"   # naranja — sobre el promedio
-        elif v >= tasa_global - 10:
-            return "#F1C40F"   # amarillo — cerca del promedio
-        else:
-            return "#27AE60"   # verde — bajo informalidad
-
-    def trazar(x_vals, y_vals, row, col):
-        y_r  = [round(v, 1) for v in y_vals]
-        x_s  = [str(v) for v in x_vals]
-        cols = [color_punto(v) for v in y_r]
-
-        fig.add_trace(go.Scatter(
-            x=x_s, y=y_r,
-            mode="lines+markers+text",
-            line=dict(color="#2C3E50", width=3),
-            marker=dict(
-                size=16,
-                color=cols,
-                line=dict(color="white", width=2.5),
-            ),
-            text=[f"<b>{v:.0f}%</b>" for v in y_r],
-            textposition="top center",
-            textfont=dict(size=12, color="#1a1a2e", family="Arial"),
-            showlegend=False,
-            hovertemplate="<b>%{x}</b><br>Informalidad: <b>%{y:.1f}%</b><extra></extra>",
-        ), row=row, col=col)
-
-    # ① Tamaño del establecimiento — de 1 persona a 201+
-    t1 = (
-        df.assign(_t=df["P3069"].map(LABELS_TAM))
-        .dropna(subset=["_t"])
-        .groupby(["P3069", "_t"], observed=True)
-        .apply(tasa_pond_grp, include_groups=False)
-        .reset_index()
-        .sort_values("P3069")
-    )
-    t1.columns = ["P3069", "cat", "tasa"]
-    trazar(t1["cat"], t1["tasa"], 1, 1)
-
-    # ② Tipo de contrato
-    t2 = (
-        df.assign(_c=df["P6450"].map({1: "Verbal", 2: "Escrito", 9: "NS/NR"}))
-        .dropna(subset=["_c"])
-        .groupby("_c", observed=True)
-        .apply(tasa_pond_grp, include_groups=False)
-        .reset_index()
-    )
-    t2.columns = ["cat", "tasa"]
-    t2 = t2.sort_values("tasa")
-    trazar(t2["cat"], t2["tasa"], 1, 2)
-
-    # ③ Posición ocupacional — ordenada de menor a mayor informalidad
-    t3 = (
-        df.assign(_p=df["P6430"].map(LABELS_POS))
-        .dropna(subset=["_p"])
-        .groupby("_p", observed=True)
-        .apply(tasa_pond_grp, include_groups=False)
-        .reset_index()
-    )
-    t3.columns = ["cat", "tasa"]
-    t3 = t3.sort_values("tasa")
-    trazar(t3["cat"], t3["tasa"], 1, 3)
-
-    # ④ Nivel educativo — del más bajo al más alto
-    t4 = (
-        df.assign(_e=df["P3042"].map(LABELS_EDU))
-        .dropna(subset=["_e"])
-        .groupby(["P3042", "_e"], observed=True)
-        .apply(tasa_pond_grp, include_groups=False)
-        .reset_index()
-        .sort_values("P3042")
-    )
-    t4.columns = ["P3042", "cat", "tasa"]
-    trazar(t4["cat"], t4["tasa"], 2, 1)
-
-    # ⑤ Grupo de edad — quinquenios 15-74
-    df_age = df[df["P6040"].between(15, 74)].copy()
-    df_age["_g"] = pd.cut(df_age["P6040"], bins=range(14, 76, 5),
-                           labels=[f"{i}-{i+4}" for i in range(15, 75, 5)])
-    t5 = (
-        df_age.dropna(subset=["_g"])
-        .groupby("_g", observed=True)
-        .apply(tasa_pond_grp, include_groups=False)
-        .reset_index()
-    )
-    t5.columns = ["cat", "tasa"]
-    trazar(t5["cat"].astype(str), t5["tasa"], 2, 2)
-
-    # Línea de referencia global
-    fig.add_hline(
-        y=tasa_global,
-        line_dash="dash",
-        line_color="rgba(44,62,80,0.55)",
-        line_width=2,
-        annotation_text=f"<b>Promedio nacional: {tasa_global:.1f}%</b>",
-        annotation_position="top right",
-        annotation_font=dict(size=11, color="#2C3E50"),
-        annotation_bgcolor="rgba(255,255,255,0.85)",
-    )
-
-    # Leyenda de colores (como texto en la figura)
-    fig.add_annotation(
-        text=(
-            "<b>Color del punto:</b>  "
-            "<span style='color:#C0392B'>●</span> Alto riesgo  "
-            "<span style='color:#E67E22'>●</span> Sobre promedio  "
-            "<span style='color:#F1C40F'>●</span> Cerca del promedio  "
-            "<span style='color:#27AE60'>●</span> Bajo riesgo"
-        ),
-        xref="paper", yref="paper",
-        x=0.5, y=-0.04,
-        showarrow=False,
-        font=dict(size=11),
-        align="center",
-    )
-
-    fig.update_yaxes(
-        range=[0, 118],
-        ticksuffix="%",
-        tickfont=dict(size=11, color="#333"),
-        gridcolor="#E8ECF0",
-        gridwidth=1,
-        zeroline=False,
-    )
-    fig.update_xaxes(
-        tickangle=-35,
-        tickfont=dict(size=10, color="#333"),
-    )
-    fig.update_annotations(font=dict(size=13, family="Arial"))
-    fig.update_layout(
-        height=680,
-        showlegend=False,
-        margin=dict(t=80, b=70, l=55, r=20),
-        font=dict(family="Arial, sans-serif", size=12),
-        plot_bgcolor="#F4F6F9",
-        paper_bgcolor="white",
-    )
-    return fig
-
-
-def build_interaction_chart(df, tasa_global):
-    """Interacción: tamaño de empresa × tipo de contrato → tasa de informalidad ponderada."""
-    df_int = df[df["P6450"].isin([1, 2, 9]) & df["P3069"].notna()].copy()
-    df_int["MICRO"]    = df_int["P3069"].isin([1, 2, 3]).astype(int)
-    df_int["Contrato"] = df_int["P6450"].map({1: "Verbal", 2: "Escrito", 9: "NS/NR"})
-    df_int["Empresa"]  = df_int["MICRO"].map({
-        1: "Microempresa  (1–10 personas)",
-        0: "Gran empresa  (11+ personas)",
-    })
-
-    tasa_int = (
-        df_int
-        .groupby(["Empresa", "Contrato"], observed=True)
-        .apply(tasa_pond_grp, include_groups=False)
-        .reset_index()
-        .rename(columns={0: "tasa"})
-    )
-    tasa_int["pct"] = tasa_int["tasa"].round(1)
-    orden = {"Verbal": 0, "Escrito": 1, "NS/NR": 2}
-    tasa_int = tasa_int.assign(_ord=tasa_int["Contrato"].map(orden)).sort_values(["_ord", "Empresa"])
-
-    # Escala de grises: Microempresa = negro (foco), Gran empresa = gris claro (contexto)
-    # La ALTURA de la barra muestra el efecto del tipo de contrato dentro de cada grupo
-    COLORES_EMP = {
-        "Microempresa  (1–10 personas)": "#1A1A1A",
-        "Gran empresa  (11+ personas)":  "#C8C8C8",
-    }
-
-    micro_v = tasa_int.query("Empresa.str.startswith('Micro') and Contrato=='Verbal'")["pct"].values[0]
-    micro_e = tasa_int.query("Empresa.str.startswith('Micro') and Contrato=='Escrito'")["pct"].values[0]
-    delta   = micro_v - micro_e
-
-    fig = go.Figure()
-
-    for empresa, color in COLORES_EMP.items():
-        sub      = tasa_int[tasa_int["Empresa"] == empresa]
-        is_micro = empresa.startswith("Micro")
-        fig.add_trace(go.Bar(
-            name=("■ " if is_micro else "□ ") + empresa.strip(),
-            x=sub["Contrato"],
-            y=sub["pct"],
-            marker=dict(
-                color=color,
-                opacity=1.0 if is_micro else 0.9,
-                line=dict(color="white", width=2.5),
-            ),
-            text=[f"<b>{v:.1f}%</b>" for v in sub["pct"]],
-            textposition="outside",
-            textfont=dict(size=17, family="Arial Black, Arial Bold, Arial", color="#111111"),
-        ))
-
-    # Línea promedio nacional
-    fig.add_hline(
-        y=tasa_global,
-        line_dash="dash", line_color="rgba(44,62,80,0.50)", line_width=2,
-        annotation_text=f"<b>Promedio nacional: {tasa_global:.1f}%</b>",
-        annotation_position="top right",
-        annotation_font=dict(size=12, color="#2C3E50"),
-        annotation_bgcolor="rgba(255,255,255,0.88)",
-    )
-
-    # Anotación del hallazgo principal
-    fig.add_annotation(
-        xref="paper", yref="paper", x=0.01, y=0.98,
-        text=(
-            f"<b>Microempresa — contrato escrito:</b><br>"
-            f"<b>{micro_v:.1f}%  →  {micro_e:.1f}%  (↓ {delta:.0f} pp)</b>"
-        ),
-        showarrow=False,
-        font=dict(size=14, color="#1A1A1A", family="Arial"),
-        bgcolor="rgba(245,245,245,0.96)",
-        bordercolor="#1A1A1A", borderwidth=1.5, borderpad=10,
-        align="left", xanchor="left", yanchor="top",
-    )
-
-    fig.update_layout(
-        title=dict(
-            text=(
-                "<b>¿El contrato escrito protege incluso en microempresas?</b><br>"
-                "<sup>Interacción entre las dos variables más importantes del modelo  "
-                "(SHAP #1 Microempresa · SHAP #2 Contrato verbal)</sup>"
-            ),
-            font=dict(size=17, family="Arial Black, Arial Bold, Arial", color="#1a1a2e"),
-        ),
-        xaxis=dict(
-            title="<b>Tipo de contrato</b>",
-            title_font=dict(size=14, color="#333"),
-            tickfont=dict(size=15, family="Arial Black, Arial Bold", color="#222"),
-        ),
-        yaxis=dict(
-            title="<b>Tasa de informalidad (%)</b>",
-            title_font=dict(size=14, color="#333"),
-            tickfont=dict(size=13, color="#333"),
-            range=[0, 120],
-            ticksuffix="%",
-            gridcolor="#DCDCDC", gridwidth=1, zeroline=False,
-        ),
-        barmode="group",
-        bargap=0.28,
-        bargroupgap=0.05,
-        height=510,
-        plot_bgcolor="#F8F9FA",
-        paper_bgcolor="white",
-        font=dict(family="Arial, sans-serif", size=13),
-        legend=dict(
-            orientation="h", x=0.5, xanchor="center", y=1.04,
-            bgcolor="rgba(255,255,255,0.92)",
-            bordercolor="#CCCCCC", borderwidth=1,
-            font=dict(size=13),
-        ),
-        margin=dict(t=130, b=55, l=75, r=30),
-    )
-    fig.update_xaxes(gridcolor="#DCDCDC", zeroline=False)
-    return fig
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -684,287 +350,55 @@ tab_arq, tab_dash, tab_dpto, tab_modelo, tab_pred = st.tabs([
 # TAB 1 — Arquitectura & Pipeline  (SI7006)
 # ══════════════════════════════════════════════════════════════════════════
 with tab_arq:
-    st.subheader("Ciclo de vida de los datos — SI7006 Almacenamiento y Procesamiento")
-
     col_pipe, col_tech = st.columns([1, 1], gap="large")
 
     with col_pipe:
-        st.markdown("#### 🔄 Flujo de datos (Batch Pipeline)")
+        st.markdown("#### Pipeline de datos — Batch")
         st.code("""
 ORIGEN
-  DANE – GEIH 2024 (microdatos públicos)
-  24 archivos CSV: 12 × Características Generales
-                   12 × Ocupados
-  ~817 550 registros totales
-
-        │  Ingesta batch mensual (Pandas)
-        │  Selección de columnas relevantes
+  DANE – GEIH 2024 · 24 CSV · 817 550 registros
+  Ingesta batch mensual (Pandas)
+        │
         ▼
-
 ALMACENAMIENTO CRUDO
-  parquet/geih_2024_crudo.parquet  [6.2 MB]
-  geih_2024.duckdb                 [tabla "geih", 358K filas]
-
-        │  JOIN por DIRECTORIO + SECUENCIA_P + ORDEN
-        │  Construcción variable INFORMAL (P6920)
-        │  Imputación · encoding · feature engineering
+  geih_2024_crudo.parquet  [6.2 MB]
+  geih_2024.duckdb         [358K filas · SQL analítico]
+  JOIN: DIRECTORIO + SECUENCIA_P + ORDEN
+        │
         ▼
-
-ALMACENAMIENTO PROCESADO
-  parquet/train.parquet  [281 376 filas · 45 features]
-  parquet/test.parquet   [ 70 345 filas · 45 features]
-
-        │  Entrenamiento LR · RF · LightGBM · XGBoost
-        │  Early stopping · threshold tuning
-        │  Registro en MLflow (local)
+PREPROCESAMIENTO
+  train.parquet  [121K filas · 13 features]
+  test.parquet   [ 30K filas · 13 features]
+  preprocessor.joblib  [ColumnTransformer]
+        │
         ▼
-
+MODELADO
+  LightGBM · RF · XGBoost · Regresión Logística
+  Early stopping · Threshold tuning (0.41)
+        │
+        ▼
 DESPLIEGUE
-  outputs/champion_geih.pkl        [LightGBM · 11.5 MB]
-  outputs/champion_geih_meta.json  [métricas y umbral]
-  app.py → Streamlit Community Cloud (GitHub)
+  champion_geih.pkl  [11.5 MB]
+  app.py → Streamlit Community Cloud
         """, language="text")
 
     with col_tech:
-        st.markdown("#### 🖥️ Ambiente Tecnológico")
+        st.markdown("#### Stack tecnológico")
         st.markdown("""
-| Capa | Tecnología | Rol |
-|------|-----------|-----|
-| **Ingesta** | Python · Pandas | Carga batch de 24 CSV GEIH |
-| **Almacenamiento NoSQL** | Parquet (PyArrow) | Almacenamiento columnar eficiente |
-| **Motor SQL analítico** | **DuckDB** | JOINs y consultas in-process sobre Parquet |
-| **Procesamiento** | Pandas · NumPy | ETL y feature engineering |
-| **ML — modelos** | scikit-learn · LightGBM | Entrenamiento y evaluación |
-| **Tuning** | Optuna | Búsqueda bayesiana de hiperparámetros |
-| **Tracking** | MLflow (local) | Registro de experimentos y artefactos |
-| **Interpretabilidad** | SHAP | Importancia de variables por predicción |
-| **Visualización** | Plotly · Streamlit | Dashboard interactivo |
-| **Nube** | Streamlit Community Cloud | Despliegue público sin costo |
-| **Control de versiones** | GitHub | Código, pipeline y reproducibilidad |
+| Capa | Tecnología |
+|------|-----------|
+| **Ingesta** | Python · Pandas |
+| **Almacenamiento** | Parquet (PyArrow) · DuckDB |
+| **Procesamiento** | scikit-learn · ColumnTransformer |
+| **Modelado** | LightGBM · XGBoost · scikit-learn |
+| **Interpretabilidad** | SHAP (TreeExplainer) |
+| **Visualización** | Plotly · Streamlit |
+| **Despliegue** | Streamlit Community Cloud · GitHub |
         """)
 
-        st.markdown("#### 🏗️ Arquitectura de referencia")
-        st.markdown("""
-        Arquitectura **batch local → nube**:
-
-        ```
-        [Fuente CSV]  →  [Parquet + DuckDB]  →  [Pipeline ML]  →  [API Streamlit]
-             ↑                  ↑                      ↑                 ↑
-           DANE             PyArrow              scikit-learn         GitHub
-                           in-process           LightGBM             Cloud
-        ```
-
-        - **Sin servicios de pago**: Google Colab + Drive para cómputo, Streamlit Cloud para despliegue.
-        - **Escalable**: el pipeline se re-ejecuta con nuevas descargas anuales de la GEIH.
-        - **Ingesta**: modo **batch** (mensual). No se requiere streaming para datos censales anuales.
-        """)
-
-    st.divider()
-    col_a, col_b, col_c = st.columns(3)
-
-    with col_a:
-        st.markdown("#### 📦 Origen y cobertura")
-        st.markdown("""
-- **Fuente:** DANE – Gran Encuesta Integrada de Hogares (GEIH) 2024
-- **Cobertura:** 33 dominios geográficos (todo el país)
-- **Período:** Enero – Diciembre 2024
-- **Módulos utilizados:**
-  - *Características Generales* (sociodemográfico)
-  - *Ocupados* (laboral + variable objetivo)
-- **Universo encuestado:** ~817 550 personas
-- **Muestra analítica:** 351 721 ocupados con P6920 válido
-- **Acceso:** [microdata.dane.gov.co](https://microdatos.dane.gov.co/index.php/catalog/819) — datos públicos anonimizados
-        """)
-
-    with col_b:
-        st.markdown("#### 💾 Almacenamiento y persistencia")
-        st.markdown("""
-**Parquet (NoSQL columnar):**
-- `geih_2024_crudo.parquet` — 6.2 MB
-- `train.parquet` · `test.parquet`
-- `datos_procesados.parquet` — 6.1 MB
-
-**DuckDB (SQL analítico):**
-- Tabla `geih` — 358 029 registros
-- JOIN por clave compuesta:
-  `DIRECTORIO + SECUENCIA_P + ORDEN`
-- Consultas SQL sobre Parquet directamente
-
-**Modelo serializado:**
-- `champion_geih.pkl` — LightGBM (11.5 MB)
-- `preprocessor.joblib` — pipeline scikit-learn
-- `champion_geih_meta.json` — métricas y umbral óptimo
-        """)
-
-    with col_c:
-        st.markdown("#### 🔗 Despliegue del modelo")
-        st.markdown("""
-**Persistencia:**
-- Modelo serializado con `pickle`
-- Preprocessor con `joblib`
-- Publicados en repositorio GitHub
-
-**API de predicción:**
-- `model.predict_proba(X)` → score [0,1]
-- Umbral óptimo: 0.41 (threshold tuning sobre validación)
-- Input: 17 variables socioeconómicas y laborales
-
-**Visualización (este dashboard):**
-- Mapa interactivo por departamento
-- EDA con filtros por zona y sector
-- Predictor individual con gauge de riesgo
-- Comparativa de modelos + SHAP
-
-**Publicación:**
-- Streamlit Community Cloud (GitHub → deploy)
-- Enlace público sin costo
-        """)
-
-# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═
+# ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
-# TAB 2 — ¿Por qué permanecen informales?
-# ═
+# ══════════════════════════════════════════════════════════════════════════
 with tab_dash:
     if df is None:
         st.info("Ejecuta los notebooks para cargar datos reales.")
@@ -1658,13 +1092,13 @@ with tab_modelo:
 
     | Variable | Dirección del impacto | Importancia SHAP (referencial) |
     |---|---|---|
-    | Años de educación | ↓ Reduce informalidad | **#1** |
-    | Departamento (enc.) | Varía por región | **#2** |
-    | Rama de actividad (enc.) | Varía por sector | **#3** |
-    | Edad | Curva no lineal (jóvenes y mayores) | **#4** |
-    | Horas / semana | ↓ Más horas = menor riesgo | **#5** |
-    | Zona (urbano/rural) | ↑ Rural = mayor riesgo | **#6** |
-    | Estado civil | Efecto social / responsabilidad | **#7** |
+    | Microempresa (≤10 empleados) | ↑ Mayor informalidad | **#1** |
+    | Años de educación | ↓ Reduce informalidad | **#2** |
+    | Departamento (enc.) | Varía por región | **#3** |
+    | Tamaño del establecimiento | ↓ Mayor empresa = menor riesgo | **#4** |
+    | Rama de actividad (enc.) | Varía por sector | **#5** |
+    | Edad | Curva no lineal (jóvenes y mayores) | **#6** |
+    | Horas / semana | ↓ Más horas = menor riesgo | **#7** |
 
     > Los valores SHAP exactos se actualizan al reentrenar el modelo con la nueva muestra de trabajadores independientes.
     """)
@@ -1818,14 +1252,15 @@ with tab_pred:
                 st.markdown("""
 | Factor | Dirección | Impacto relativo |
 |---|---|---|
-| Años de educación bajos | ↑ Mayor riesgo | ★★★★★ |
-| Departamentos con alta informalidad estructural | ↑ Mayor riesgo | ★★★★☆ |
-| Sector agricultura / construcción / hogares | ↑ Mayor riesgo | ★★★☆☆ |
+| Microempresa (≤ 10 trabajadores) | ↑ Mayor riesgo | ★★★★★ |
+| Años de educación bajos | ↑ Mayor riesgo | ★★★★☆ |
 | Zona rural | ↑ Mayor riesgo | ★★★☆☆ |
-| Pocas horas semanales (subempleo) | ↑ Mayor riesgo | ★★★☆☆ |
-| Educación técnica / universitaria o más | ↓ Reduce riesgo | ★★★★★ |
-| Zona cabecera municipal | ↓ Reduce riesgo | ★★★☆☆ |
+| Sector agricultura / construcción / hogares | ↑ Mayor riesgo | ★★★☆☆ |
+| Departamentos con alta informalidad estructural | ↑ Mayor riesgo | ★★★☆☆ |
 | Más horas semanales trabajadas | ↓ Reduce riesgo | ★★☆☆☆ |
+| Empresa grande (> 30 empleados) | ↓ Reduce riesgo | ★★★★☆ |
+| Educación técnica / universitaria o más | ↓ Reduce riesgo | ★★★★☆ |
+| Zona cabecera municipal | ↓ Reduce riesgo | ★★★☆☆ |
                 """)
 
         except Exception as ex:
