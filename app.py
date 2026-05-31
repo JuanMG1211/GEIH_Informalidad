@@ -11,7 +11,7 @@ from pathlib import Path
 from groq import Groq
 
 st.set_page_config(
-    page_title="Informalidad Laboral · Colombia 2024",
+    page_title="Informalidad Laboral · Colombia 2025",
     page_icon="🇨🇴",
     layout="wide",
 )
@@ -217,7 +217,7 @@ DIAGNÓSTICO DEL MODELO:
 - Nivel de riesgo: {riesgo}
 
 CONTEXTO: Este trabajador fue clasificado como INFORMAL por un modelo LightGBM
-entrenado sobre la Gran Encuesta Integrada de Hogares (GEIH 2024) del DANE,
+entrenado sobre la Gran Encuesta Integrada de Hogares (GEIH 2025) del DANE,
 con AUC-ROC de 0.95 y F1 de 0.96. La informalidad aquí significa no cotizar
 a pensión (P6920), lo que implica desprotección ante vejez, enfermedad y muerte.
 
@@ -259,10 +259,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🇨🇴 Predicción de Informalidad Laboral · Colombia 2024")
+st.title("🇨🇴 Predicción de Informalidad Laboral · Colombia 2025")
 st.caption(
     "Proyecto Final de Maestría · Juan Andrés Montoya · Julián David Mejía · "
-    "GEIH 2024 – DANE  |  SI7006 · SI7007 · SI7009"
+    "GEIH 2025 – DANE  |  SI7006 · SI7007 · SI7009"
 )
 
 st.markdown("""
@@ -333,7 +333,7 @@ with st.sidebar:
     else:
         st.info("Sin API Key — recomendaciones IA desactivadas")
     st.markdown("---")
-    st.caption("Proyecto Final · Maestría · GEIH 2024")
+    st.caption("Proyecto Final · Maestría · GEIH 2025")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TABS
@@ -356,13 +356,13 @@ with tab_arq:
         st.markdown("#### Pipeline de datos — Batch")
         st.code("""
 ORIGEN
-  DANE – GEIH 2024 · 24 CSV · 817 550 registros
+  DANE – GEIH 2025 · 24 CSV · 817 550 registros
   Ingesta batch mensual (Pandas)
         │
         ▼
 ALMACENAMIENTO CRUDO
-  geih_2024_crudo.parquet  [6.2 MB]
-  geih_2024.duckdb         [358K filas · SQL analítico]
+  geih_2025_crudo.parquet  [6.2 MB]
+  geih_2025.duckdb         [358K filas · SQL analítico]
   JOIN: DIRECTORIO + SECUENCIA_P + ORDEN
         │
         ▼
@@ -630,7 +630,7 @@ with tab_dpto:
         "la informalidad entre trabajadores independientes"
     )
     st.caption(
-        "Tasa ponderada por FEX_C18 · GEIH 2024 · Trabajadores por cuenta propia (P6430 = 4). "
+        "Tasa ponderada por FEX_C18 · GEIH 2025 · Trabajadores por cuenta propia (P6430 = 4). "
         "**Rojo** = sobre el promedio · **Amarillo** = cerca del promedio · **Azul** = bajo el promedio. "
         "Borde negro = Top 5 más y menos informales."
     )
@@ -1030,7 +1030,7 @@ with tab_pred:
     st.info(
         "**Modelo entrenado exclusivamente sobre trabajadores independientes (Cuenta propia · P6430 = 4).** "
         "Ingresa las características del trabajador para obtener su score de riesgo de informalidad "
-        "según LightGBM entrenado sobre GEIH 2024."
+        "según LightGBM entrenado sobre GEIH 2025."
     )
 
     if model is None or preprocessor is None:
@@ -1157,7 +1157,7 @@ with tab_pred:
                         st.markdown(st.session_state["recomendaciones_ia"])
                         st.caption(
                             "Recomendaciones generadas por Llama 3.3 70B (Groq) "
-                            "basadas en el perfil del trabajador y el contexto GEIH 2024. "
+                            "basadas en el perfil del trabajador y el contexto GEIH 2025. "
                             "No constituyen asesoría oficial del Ministerio de Trabajo."
                         )
 
@@ -1197,7 +1197,7 @@ with st.expander("📌 Hallazgos clave y recomendaciones de política pública",
         st.markdown("#### 🔍 Hallazgos principales")
         st.markdown("""
 **1. Magnitud:**
-~85% de los trabajadores por cuenta propia en Colombia son informales (tasa ponderada DANE 2024).
+~85% de los trabajadores por cuenta propia en Colombia son informales (tasa ponderada DANE 2025).
 La formalidad entre independientes no es la norma — es la excepción.
 
 **2. La informalidad no es una elección:**
@@ -1243,7 +1243,7 @@ aumentaría significativamente su efectividad.
         """)
 
 st.caption(
-    "Fuente: DANE – Gran Encuesta Integrada de Hogares 2024. "
+    "Fuente: DANE – Gran Encuesta Integrada de Hogares 2025. "
     "El DANE no avala los resultados del análisis. "
     "Maestría en Ciencia de Datos y Analítica · EAFIT · 2025."
 )

@@ -1,3 +1,7 @@
 .venv
 GUIA_ESTUDIO_PRESENTACION.md
 document.md
+generar_informe.py
+informe.md
+pre.md
+informe_final.docx
