@@ -124,7 +124,10 @@ def load_meta():
 @st.cache_data
 def load_data():
     if DATA_PATH.exists():
-        return pd.read_parquet(DATA_PATH)
+        df = pd.read_parquet(DATA_PATH)
+        if "P6430" in df.columns:
+            df = df[df["P6430"] == 4].copy()
+        return df
     return None
 
 @st.cache_data
@@ -188,31 +191,31 @@ def tasa_pond_grp(g):
 
 # ── Helper: construir input para el preprocessor ─────────────────────────
 def construir_input(p6040, p3271, p6070, clase, dpto,
-                    p6430, p6450, p6800, p3069, rama,
+                    p6450, p6800, p3069, rama,
                     anios_edu, pluriempleo):
+    """Construye el vector de entrada para el modelo de trabajadores independientes.
+    El modelo fue entrenado exclusivamente sobre P6430 == 4 (Cuenta propia).
+    """
     mapa_edu = {1:0, 2:1, 3:3, 4:5, 5:7, 6:9, 7:10,
                 8:11, 9:14, 10:16, 11:17, 12:18, 13:21}
     bins   = [14, 24, 34, 44, 54, 64, 120]
     labels = ["15-24", "25-34", "35-44", "45-54", "55-64", "65+"]
     edad_grupo = pd.cut([p6040], bins=bins, labels=labels)[0]
     row = {
-        "P3271":           p3271,
-        "P6040":           p6040,
-        "EDAD_GRUPO":      str(edad_grupo),
-        "ANIOS_EDU":       anios_edu,
-        "P6070":           p6070,
-        "CLASE":           clase,
-        "DPTO":            dpto,
-        "P6430":           p6430,
-        "P6450":           p6450,
-        "P6800":           p6800,
-        "P3069":           p3069,
-        "RAMA2D_R4":       rama,
-        "CUENTA_PROPIA":   int(p6430 == 4),
-        "MICROEMPRESA":    int(p3069 in [1, 2, 3]),
-        "SUBEMPLEADO":     int(p6800 < 32),
-        "PLURIEMPLEO":     pluriempleo,
-        "CONTRATO_VERBAL": int(p6450 == 1),
+        "P3271":        p3271,
+        "P6040":        p6040,
+        "EDAD_GRUPO":   str(edad_grupo),
+        "ANIOS_EDU":    anios_edu,
+        "P6070":        p6070,
+        "CLASE":        clase,
+        "DPTO":         dpto,
+        "P6450":        p6450,
+        "P6800":        p6800,
+        "P3069":        p3069,
+        "RAMA2D_R4":    rama,
+        "MICROEMPRESA": int(p3069 in [1, 2, 3]),
+        "SUBEMPLEADO":  int(p6800 < 32),
+        "PLURIEMPLEO":  pluriempleo,
     }
     return pd.DataFrame([row])
 
@@ -408,12 +411,12 @@ def build_interaction_chart(df, tasa_global):
     orden = {"Verbal": 0, "Escrito": 1, "NS/NR": 2}
     tasa_int = tasa_int.assign(_ord=tasa_int["Contrato"].map(orden)).sort_values(["_ord", "Empresa"])
 
-    # Color semántico por nivel de riesgo (no por empresa)
-    def bar_color(pct, is_micro):
-        if pct >= 70:   return "#A93226" if is_micro else "#E74C3C"
-        elif pct >= 40: return "#CA6F1E" if is_micro else "#E67E22"
-        elif pct >= 20: return "#B7950B" if is_micro else "#F4D03F"
-        else:           return "#1A5276" if is_micro else "#2980B9"
+    # Escala de grises: Microempresa = negro (foco), Gran empresa = gris claro (contexto)
+    # La ALTURA de la barra muestra el efecto del tipo de contrato dentro de cada grupo
+    COLORES_EMP = {
+        "Microempresa  (1–10 personas)": "#1A1A1A",
+        "Gran empresa  (11+ personas)":  "#C8C8C8",
+    }
 
     micro_v = tasa_int.query("Empresa.str.startswith('Micro') and Contrato=='Verbal'")["pct"].values[0]
     micro_e = tasa_int.query("Empresa.str.startswith('Micro') and Contrato=='Escrito'")["pct"].values[0]
@@ -421,23 +424,17 @@ def build_interaction_chart(df, tasa_global):
 
     fig = go.Figure()
 
-    # Zonas de fondo
-    fig.add_hrect(y0=70, y1=120, fillcolor="rgba(169,50,38,0.07)",  line_width=0, layer="below")
-    fig.add_hrect(y0=0,  y1=25,  fillcolor="rgba(26,82,118,0.07)",  line_width=0, layer="below")
-
-    for empresa in ["Microempresa  (1–10 personas)", "Gran empresa  (11+ personas)"]:
+    for empresa, color in COLORES_EMP.items():
         sub      = tasa_int[tasa_int["Empresa"] == empresa]
         is_micro = empresa.startswith("Micro")
-        cols     = [bar_color(v, is_micro) for v in sub["pct"]]
         fig.add_trace(go.Bar(
-            name=("▮ " if is_micro else "▯ ") + empresa.strip(),
+            name=("■ " if is_micro else "□ ") + empresa.strip(),
             x=sub["Contrato"],
             y=sub["pct"],
             marker=dict(
-                color=cols,
-                opacity=1.0 if is_micro else 0.60,
+                color=color,
+                opacity=1.0 if is_micro else 0.9,
                 line=dict(color="white", width=2.5),
-                pattern_shape="" if is_micro else "/",
             ),
             text=[f"<b>{v:.1f}%</b>" for v in sub["pct"]],
             textposition="outside",
@@ -454,30 +451,18 @@ def build_interaction_chart(df, tasa_global):
         annotation_bgcolor="rgba(255,255,255,0.88)",
     )
 
-    # Caja del hallazgo principal (top-left)
+    # Anotación del hallazgo principal
     fig.add_annotation(
         xref="paper", yref="paper", x=0.01, y=0.98,
         text=(
-            f"<b>💡  CONTRATO ESCRITO en microempresa:</b><br>"
-            f"<b>    {micro_v:.1f}%  →  {micro_e:.1f}%  &nbsp;(↓ {delta:.0f} puntos porcentuales)</b>"
+            f"<b>Microempresa — contrato escrito:</b><br>"
+            f"<b>{micro_v:.1f}%  →  {micro_e:.1f}%  (↓ {delta:.0f} pp)</b>"
         ),
         showarrow=False,
-        font=dict(size=14, color="#A93226", family="Arial"),
-        bgcolor="rgba(255,245,245,0.96)",
-        bordercolor="#A93226", borderwidth=2, borderpad=10,
+        font=dict(size=14, color="#1A1A1A", family="Arial"),
+        bgcolor="rgba(245,245,245,0.96)",
+        bordercolor="#1A1A1A", borderwidth=1.5, borderpad=10,
         align="left", xanchor="left", yanchor="top",
-    )
-
-    # Etiquetas de zona
-    fig.add_annotation(
-        xref="paper", yref="y", x=0.995, y=108,
-        text="<b>⚠ ZONA CRÍTICA  (&gt;70%)</b>",
-        showarrow=False, font=dict(size=11, color="#A93226"), xanchor="right",
-    )
-    fig.add_annotation(
-        xref="paper", yref="y", x=0.995, y=13,
-        text="<b>✓ ZONA SEGURA  (&lt;25%)</b>",
-        showarrow=False, font=dict(size=11, color="#1A5276"), xanchor="right",
     )
 
     fig.update_layout(
@@ -543,10 +528,14 @@ st.caption(
 
 st.markdown("""
 <div class="pregunta-oro">
-<b>🏆 Pregunta de Oro:</b> ¿Cuáles son las características socioeconómicas y laborales que mejor
-predicen la informalidad de un trabajador colombiano, y cómo puede este conocimiento focalizar
-las intervenciones del Ministerio del Trabajo y el SENA hacia los perfiles con mayor probabilidad
-de informalidad?
+<b>🏆 Pregunta de Oro:</b> ¿Por qué los trabajadores independientes en Colombia permanecen informales,
+y qué condiciones deben cambiar para que la formalización sea una opción viable para ellos?<br><br>
+<span style='font-size:0.95rem; color:#b3cde3;'>
+<b>Hipótesis:</b> La informalidad en trabajadores independientes no es una elección aleatoria sino un resultado
+predecible de condiciones estructurales — sector, tamaño del entorno laboral, zona geográfica y nivel educativo.
+Intervenir sobre esas condiciones, en lugar de ofrecer programas universales, aumentaría significativamente
+la efectividad de los programas de formalización existentes.
+</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -589,10 +578,10 @@ st.divider()
 # ══════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════
-tab_arq, tab_mapa, tab_eda, tab_modelo, tab_pred = st.tabs([
+tab_arq, tab_dash, tab_dpto, tab_modelo, tab_pred = st.tabs([
     "🏛️ Arquitectura & Pipeline",
-    "🗺️ Mapa Departamental",
-    "📊 Análisis Exploratorio",
+    "📊 ¿Por qué permanecen informales?",
+    "🗺️ Informalidad por departamento",
     "📈 Desempeño del Modelo",
     "🔮 Predicción Individual",
 ])
@@ -737,502 +726,639 @@ DESPLIEGUE
 - Enlace público sin costo
         """)
 
-# ══════════════════════════════════════════════════════════════════════════
-# TAB 2 — Mapa Departamental
-# ══════════════════════════════════════════════════════════════════════════
-with tab_mapa:
-    st.subheader("Tasa de informalidad por departamento · GEIH 2024")
-
-    if df is not None:
-        f_col1, f_col2 = st.columns([2, 2])
-        with f_col1:
-            zona_sel = st.radio(
-                "Filtrar por zona",
-                ["Todas", "Cabecera municipal", "Rural"],
-                horizontal=True,
-            )
-        with f_col2:
-            sector_opts = {"Todos los sectores": None}
-            sector_opts.update({v: k for k, v in RAMA_CIIU.items()})
-            sector_sel = st.selectbox("Filtrar por sector económico", list(sector_opts.keys()))
-
-        df_mapa = df.copy()
-        if zona_sel == "Cabecera municipal":
-            df_mapa = df_mapa[df_mapa["CLASE"] == 1]
-        elif zona_sel == "Rural":
-            df_mapa = df_mapa[df_mapa["CLASE"] == 2]
-        if sector_opts[sector_sel] is not None:
-            df_mapa = df_mapa[df_mapa["RAMA2D_R4"] == sector_opts[sector_sel]]
-
-        if len(df_mapa) == 0:
-            st.warning("No hay datos para la combinación de filtros seleccionada.")
-        else:
-            inf_dpto = (
-                df_mapa[df_mapa["DPTO"].notna()]
-                .groupby("DPTO", observed=True)
-                .apply(tasa_pond_grp, include_groups=False)
-                .reset_index()
-                .rename(columns={0: "tasa"})
-                .query("tasa > 0")
-            )
-            inf_dpto["DPTO"]     = inf_dpto["DPTO"].astype(int)
-            inf_dpto["nombre"]   = inf_dpto["DPTO"].map(lambda d: DPTO_INFO.get(d, (str(d), 0, 0))[0])
-            inf_dpto["lat"]      = inf_dpto["DPTO"].map(lambda d: DPTO_INFO.get(d, ("", 4.5, -74))[1])
-            inf_dpto["lon"]      = inf_dpto["DPTO"].map(lambda d: DPTO_INFO.get(d, ("", 4.5, -74))[2])
-            inf_dpto["tasa_pct"] = inf_dpto["tasa"].round(1)
-
-            titulo_mapa = f"Tasa de informalidad laboral (%) — {zona_sel} · {sector_sel}"
-            geojson = load_colombia_geojson()
-
-            if geojson is not None:
-                fig_map = px.choropleth_mapbox(
-                    inf_dpto,
-                    geojson=geojson,
-                    locations="DPTO",
-                    featureidkey="properties.DANE",
-                    color="tasa_pct",
-                    color_continuous_scale="RdYlGn_r",
-                    range_color=[20, 90],
-                    mapbox_style="carto-positron",
-                    zoom=4.55,
-                    center={"lat": 4.5, "lon": -74.0},
-                    opacity=0.80,
-                    hover_name="nombre",
-                    hover_data={"tasa_pct": ":.1f", "DPTO": False,
-                                "lat": False, "lon": False},
-                    labels={"tasa_pct": "% Informal"},
-                    title=titulo_mapa,
-                )
-                fig_map.update_layout(
-                    height=600,
-                    margin=dict(r=0, t=50, l=0, b=0),
-                    coloraxis_colorbar=dict(
-                        title="% Informal",
-                        ticksuffix="%",
-                        len=0.65, thickness=16,
-                        title_font_size=13,
-                        tickfont_size=12,
-                    ),
-                )
-            else:
-                # Fallback: burbujas si el GeoJSON no cargó
-                fig_map = px.scatter_geo(
-                    inf_dpto, lat="lat", lon="lon",
-                    size="tasa_pct", color="tasa_pct",
-                    hover_name="nombre",
-                    hover_data={"tasa_pct": True, "lat": False, "lon": False},
-                    color_continuous_scale="RdYlGn_r",
-                    range_color=[20, 90], size_max=45,
-                    labels={"tasa_pct": "% Informal"},
-                    title=titulo_mapa,
-                )
-                fig_map.update_geos(
-                    visible=False, showcountries=True, countrycolor="#aaa",
-                    showsubunits=True, subunitcolor="#ccc",
-                    lonaxis_range=[-83, -65], lataxis_range=[-5, 14],
-                    bgcolor="#f8f9fa",
-                )
-                fig_map.update_layout(height=560, margin=dict(r=0, t=40, l=0, b=0))
-
-            st.plotly_chart(fig_map, use_container_width=True)
-
-            m_col1, m_col2 = st.columns([1, 1])
-            with m_col1:
-                st.markdown("**Departamentos con mayor informalidad**")
-                st.dataframe(
-                    inf_dpto[["nombre", "tasa_pct"]]
-                        .sort_values("tasa_pct", ascending=False)
-                        .head(10)
-                        .rename(columns={"nombre": "Departamento", "tasa_pct": "% Informal"})
-                        .reset_index(drop=True),
-                    use_container_width=True, height=320,
-                )
-            with m_col2:
-                st.markdown("**Departamentos con menor informalidad**")
-                st.dataframe(
-                    inf_dpto[["nombre", "tasa_pct"]]
-                        .sort_values("tasa_pct", ascending=True)
-                        .head(10)
-                        .rename(columns={"nombre": "Departamento", "tasa_pct": "% Informal"})
-                        .reset_index(drop=True),
-                    use_container_width=True, height=320,
-                )
-    else:
-        np.random.seed(42)
-        rows = [(k, round(np.random.uniform(0.35, 0.82), 3)) for k in DPTO_INFO]
-        inf_dpto = pd.DataFrame(rows, columns=["DPTO", "tasa"])
-        inf_dpto["nombre"]   = inf_dpto["DPTO"].map(lambda d: DPTO_INFO.get(d, (str(d), 0, 0))[0])
-        inf_dpto["lat"]      = inf_dpto["DPTO"].map(lambda d: DPTO_INFO.get(d, ("", 4.5, -74))[1])
-        inf_dpto["lon"]      = inf_dpto["DPTO"].map(lambda d: DPTO_INFO.get(d, ("", 4.5, -74))[2])
-        inf_dpto["tasa_pct"] = (inf_dpto["tasa"] * 100).round(1)
-        st.info("Datos de ejemplo — ejecuta los notebooks para datos reales.")
-        geojson = load_colombia_geojson()
-        if geojson is not None:
-            fig_map = px.choropleth_mapbox(
-                inf_dpto,
-                geojson=geojson,
-                locations="DPTO",
-                featureidkey="properties.DANE",
-                color="tasa_pct",
-                color_continuous_scale="RdYlGn_r",
-                range_color=[30, 85],
-                mapbox_style="carto-positron",
-                zoom=4.55,
-                center={"lat": 4.5, "lon": -74.0},
-                opacity=0.80,
-                hover_name="nombre",
-                hover_data={"tasa_pct": ":.1f", "DPTO": False,
-                            "lat": False, "lon": False},
-                labels={"tasa_pct": "% Informal"},
-                title="Tasa de informalidad laboral (%) por departamento",
-            )
-            fig_map.update_layout(
-                height=600, margin=dict(r=0, t=50, l=0, b=0),
-                coloraxis_colorbar=dict(title="% Informal", ticksuffix="%",
-                                        len=0.65, thickness=16),
-            )
-        else:
-            fig_map = px.scatter_geo(
-                inf_dpto, lat="lat", lon="lon",
-                size="tasa_pct", color="tasa_pct",
-                hover_name="nombre",
-                color_continuous_scale="RdYlGn_r",
-                range_color=[30, 85], size_max=40,
-                labels={"tasa_pct": "% Informal"},
-                title="Tasa de informalidad laboral (%) por departamento",
-            )
-            fig_map.update_geos(
-                visible=False, showcountries=True, countrycolor="#aaa",
-                lonaxis_range=[-83, -65], lataxis_range=[-5, 14],
-                bgcolor="#f8f9fa",
-            )
-            fig_map.update_layout(height=560, margin=dict(r=0, t=40, l=0, b=0))
-        st.plotly_chart(fig_map, use_container_width=True)
-
-# ══════════════════════════════════════════════════════════════════════════
-# TAB 3 — EDA Interactivo
-# ══════════════════════════════════════════════════════════════════════════
-with tab_eda:
+# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+# TAB 2 — ¿Por qué permanecen informales?
+# ═
+with tab_dash:
     if df is None:
         st.info("Ejecuta los notebooks para cargar datos reales.")
     else:
-        # Fila 1: Distribución general y por zona
-        c1, c2 = st.columns(2)
-        with c1:
-            n_f = (df["INFORMAL"] == 0).sum()
-            n_i = (df["INFORMAL"] == 1).sum()
-            fig_pie = go.Figure(go.Pie(
-                labels=["Formal", "Informal"],
-                values=[n_f, n_i],
-                marker_colors=["#2196F3", "#FF5722"],
-                textinfo="label+percent",
-                hole=0.35,
-            ))
-            fig_pie.update_layout(
-                title=f"Distribución Formal / Informal (n={n_f+n_i:,})",
-                height=330, margin=dict(t=40, b=10),
-                showlegend=True,
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+        tasa_global = (df["INFORMAL"] * df["FEX_C18"]).sum() / df["FEX_C18"].sum() * 100
+        n_total     = len(df)
+        n_informal  = (df["INFORMAL"] == 1).sum()
 
-        with c2:
+        # ── Banner ──────────────────────────────────────────────────────────────────────────────────────
+        st.markdown(
+            f'''<div style="background:linear-gradient(135deg,#6B0F1A,#A93226);
+                    color:white;padding:1.4rem 1.8rem;border-radius:10px;margin-bottom:1rem;">
+            <div style="font-size:3rem;font-weight:900;line-height:1;">{tasa_global:.0f}%</div>
+            <div style="font-size:1.15rem;margin-top:0.4rem;">
+                de los trabajadores independientes colombianos son informales
+            </div>
+            <div style="font-size:0.95rem;color:#f8c0c0;margin-top:0.5rem;">
+                No es una elección — es el resultado de condiciones estructurales concretas.
+            </div></div>''',
+            unsafe_allow_html=True,
+        )
+
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Trabajadores en muestra", f"{n_total:,}")
+        k2.metric("Informales", f"{n_informal:,}",
+                  f"{n_informal/n_total*100:.1f}% del total", delta_color="off")
+        k3.metric("Formales",   f"{n_total-n_informal:,}",
+                  f"{(n_total-n_informal)/n_total*100:.1f}% del total", delta_color="off")
+
+        # Paleta escala de grises: el color indica el grupo a resaltar, no el nivel de riesgo
+        # ── Paleta escala de grises ─────────────────────────────────────────
+        # Paleta
+        NEGRO  = "#222222"
+        GRIS_C = "#E0E0E0"
+
+        def _edu_gris(pct):
+            v = int(215 - (pct / 100) * 185)
+            return f"rgb({max(30,v)},{max(30,v)},{max(30,v)})"
+
+        # ═══════════════════════════════════════════════════════════
+        # ① TAMAÑO DEL ESTABLECIMIENTO
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        st.markdown("### Trabajar solo o en microempresa es casi sinónimo de informalidad")
+        st.caption(
+            "Cuanto más pequeña la empresa, mayor la informalidad. "
+            "A partir de 20 trabajadores la tasa se reduce a la mitad."
+        )
+
+        LABELS_TAM = {
+            1: "Solo\n(1 persona)", 2: "Micro\n(2–5)", 3: "Pequeña\n(6–10)",
+            4: "11–19", 5: "20–30", 6: "31–50",
+            7: "51–100", 8: "101–200", 9: "201+", 10: "No sabe",
+        }
+        tasa_tam = (
+            df[df["P3069"].notna()]
+            .groupby("P3069", observed=True)
+            .apply(tasa_pond_grp, include_groups=False)
+            .reset_index().rename(columns={0: "tasa"}).sort_values("P3069")
+        )
+        tasa_tam["etiqueta"] = tasa_tam["P3069"].map(LABELS_TAM)
+        tasa_tam["pct"]      = tasa_tam["tasa"].round(1)
+        n_tam = len(tasa_tam)
+
+        # Solo etiqueta en barra más alta (idx 0) y "201+" (idx n-2)
+        tam_texts = [
+            f"<b>{v:.0f}%</b>" if i == 0 or i == n_tam - 2 else ""
+            for i, v in enumerate(tasa_tam["pct"])
+        ]
+
+        fig_tam = go.Figure(go.Bar(
+            x=tasa_tam["etiqueta"], y=tasa_tam["pct"],
+            marker_color=[NEGRO if p <= 3 else GRIS_C for p in tasa_tam["P3069"]],
+            text=tam_texts,
+            textposition="outside",
+            textfont=dict(size=22, family="Arial Black, Arial Bold, Arial", color="#111111"),
+        ))
+        fig_tam.add_hline(y=tasa_global, line_dash="dot",
+                          line_color="#888888", line_width=1.5,
+                          annotation_text=f"  promedio: {tasa_global:.0f}%",
+                          annotation_position="top left",
+                          annotation_font=dict(size=12, color="#666666"),
+                          annotation_bgcolor="white")
+        # Callout en la barra de máximo riesgo
+        max_idx = int(tasa_tam["pct"].idxmax())
+        fig_tam.add_annotation(
+            x=tasa_tam.loc[max_idx, "etiqueta"],
+            y=tasa_tam.loc[max_idx, "pct"] + 7,
+            text="<b>Máximo riesgo</b>",
+            showarrow=True, arrowhead=2, arrowsize=1.2,
+            arrowcolor=NEGRO, ax=80, ay=-28,
+            font=dict(size=12, color=NEGRO),
+            bgcolor="white", bordercolor=NEGRO, borderwidth=1, borderpad=5,
+        )
+        fig_tam.update_layout(
+            xaxis=dict(
+                tickfont=dict(size=14, family="Arial", color="#111111"),
+                showgrid=False, tickangle=0,
+            ),
+            yaxis=dict(
+                range=[0, 122], ticksuffix="%",
+                gridcolor="#F4F4F4", gridwidth=1, zeroline=False,
+                tickfont=dict(size=12, color="#777777"),
+            ),
+            plot_bgcolor="white", paper_bgcolor="white",
+            height=390, showlegend=False,
+            margin=dict(t=25, b=20, l=55, r=20),
+        )
+        st.plotly_chart(fig_tam, use_container_width=True, key="dash_tam")
+
+        pct_solo = float(tasa_tam.loc[tasa_tam["P3069"]==1, "pct"].values[0])
+        pct_grnd_vals = tasa_tam.loc[tasa_tam["P3069"]==9, "pct"].values
+        pct_grnd = float(pct_grnd_vals[0]) if len(pct_grnd_vals) else float(tasa_tam.iloc[-2]["pct"])
+        st.markdown(
+            f"> **Hallazgo:** Trabajar solo tiene una tasa de **{pct_solo:.0f}%** de informalidad. "
+            f"En empresas de 201+ cae a **{pct_grnd:.0f}%** "
+            f"— una diferencia de **{pct_solo-pct_grnd:.0f} puntos porcentuales**."
+        )
+
+        # ═══════════════════════════════════════════════════════════
+        # ② EDUCACIÓN  +  ③ ZONA (como KPIs)
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        col_edu, col_zona = st.columns([3, 2])
+
+        with col_edu:
+            st.markdown("### Sin educación: 90% informal. Con universidad: menos de la mitad")
+            st.caption(
+                "El gradiente de gris sigue la informalidad: "
+                "barra oscura = alto riesgo · barra clara = bajo riesgo."
+            )
+            tasa_edu = (
+                df[df["P3042"].notna()]
+                .groupby("P3042", observed=True)
+                .apply(tasa_pond_grp, include_groups=False)
+                .reset_index().rename(columns={0: "tasa"}).sort_values("P3042")
+            )
+            tasa_edu["etiqueta"] = tasa_edu["P3042"].map(LABELS_EDU)
+            tasa_edu["pct"]      = tasa_edu["tasa"].round(1)
+
+            edu_texts = [
+                f"<b>{v:.0f}%</b>" if i in [0, len(tasa_edu)-1] else ""
+                for i, v in enumerate(tasa_edu["pct"])
+            ]
+            fig_edu = go.Figure(go.Bar(
+                x=tasa_edu["etiqueta"], y=tasa_edu["pct"],
+                marker_color=[_edu_gris(v) for v in tasa_edu["pct"]],
+                text=edu_texts, textposition="outside",
+                textfont=dict(size=18, family="Arial Black, Arial Bold, Arial", color="#111111"),
+            ))
+            fig_edu.add_hline(y=tasa_global, line_dash="dot",
+                              line_color="#888888", line_width=1.5,
+                              annotation_text=f"  promedio: {tasa_global:.0f}%",
+                              annotation_position="top left",
+                              annotation_font=dict(size=11, color="#666666"),
+                              annotation_bgcolor="white")
+            fig_edu.update_layout(
+                xaxis=dict(
+                    tickangle=-45,
+                    tickfont=dict(size=11, family="Arial", color="#111111"),
+                    showgrid=False,
+                ),
+                yaxis=dict(
+                    range=[0, 122], ticksuffix="%",
+                    gridcolor="#F4F4F4", gridwidth=1, zeroline=False,
+                    tickfont=dict(size=12, color="#777777"),
+                ),
+                plot_bgcolor="white", paper_bgcolor="white",
+                height=410, showlegend=False, margin=dict(t=25, b=90, l=55, r=15),
+            )
+            st.plotly_chart(fig_edu, use_container_width=True, key="dash_edu")
+
+            pct_ningu = float(tasa_edu.iloc[0]["pct"])
+            univ_vals = tasa_edu.loc[tasa_edu["P3042"]==10, "pct"].values
+            pct_univ  = float(univ_vals[0]) if len(univ_vals) else float(tasa_edu.iloc[-1]["pct"])
+            st.markdown(
+                f"> **Hallazgo:** Sin educación: **{pct_ningu:.0f}%** informal. "
+                f"Con universidad: **{pct_univ:.0f}%** — "
+                f"**{pct_ningu-pct_univ:.0f} pp** de diferencia."
+            )
+
+        with col_zona:
+            st.markdown("### Lo rural incrementa la informalidad")
+            st.caption("La zona geográfica amplifica todos los demás factores de riesgo.")
+
             t_zona = (
                 df[df["CLASE"].notna()]
                 .groupby("CLASE", observed=True)
                 .apply(tasa_pond_grp, include_groups=False)
-                .reset_index()
-                .rename(columns={0: "tasa"})
+                .reset_index().rename(columns={0: "tasa"})
             )
-            t_zona["pct"]      = t_zona["tasa"].round(1)
-            t_zona["etiqueta"] = t_zona["CLASE"].map({1: "Cabecera", 2: "Rural"})
-            fig_zona = px.bar(
-                t_zona, x="etiqueta", y="pct",
-                color="etiqueta",
-                color_discrete_sequence=["#5DCAA5", "#EF9F27"],
-                title="Informalidad por zona (%, ponderada)",
-                labels={"pct": "% Informal", "etiqueta": ""},
-                text="pct",
-            )
-            fig_zona.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-            fig_zona.update_layout(height=330, showlegend=False,
-                                   margin=dict(t=40, b=10), yaxis_range=[0, 100])
-            st.plotly_chart(fig_zona, use_container_width=True)
+            t_zona["pct"] = t_zona["tasa"].round(1)
+            pct_cab = float(t_zona.loc[t_zona["CLASE"]==1, "pct"].values[0])
+            pct_rur = float(t_zona.loc[t_zona["CLASE"]==2, "pct"].values[0])
+            diferencia = pct_rur - pct_cab
 
-        # Fila 2: Por posición ocupacional
-        LABELS_POS = {
-            1: "Empleado particular", 2: "Empleado gobierno",
-            3: "Doméstico",           4: "Cuenta propia",
-            5: "Empleador",           6: "Familiar s/rem.",
-            7: "Jornalero",           8: "Otro",
-        }
-        t_pos = (
-            df[df["P6430"].notna()]
-            .groupby("P6430", observed=True)
-            .apply(tasa_pond_grp, include_groups=False)
-            .reset_index()
-            .rename(columns={0: "tasa"})
-            .sort_values("tasa")
-        )
-        t_pos["pct"]      = t_pos["tasa"].round(1)
-        t_pos["etiqueta"] = t_pos["P6430"].map(LABELS_POS)
-        fig_pos = px.bar(
-            t_pos, x="pct", y="etiqueta", orientation="h",
-            color="pct", color_continuous_scale="RdYlGn_r",
-            title="Informalidad por posición ocupacional (%, ponderada)",
-            labels={"pct": "% Informal", "etiqueta": ""},
-            text="pct",
-        )
-        fig_pos.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-        fig_pos.update_layout(coloraxis_showscale=False, height=320,
-                               margin=dict(t=40, b=10))
-        st.plotly_chart(fig_pos, use_container_width=True)
-
-        # Fila 3: Por nivel educativo y grupo de edad
-        c3, c4 = st.columns(2)
-        with c3:
-            if "P3042" in df.columns:
-                t_edu = (
-                    df[df["P3042"].notna()]
-                    .groupby("P3042", observed=True)
-                    .apply(tasa_pond_grp, include_groups=False)
-                    .reset_index()
-                    .rename(columns={0: "tasa"})
-                )
-                t_edu["pct"]      = t_edu["tasa"].round(1)
-                t_edu["etiqueta"] = t_edu["P3042"].map(LABELS_EDU)
-                fig_edu = px.bar(
-                    t_edu, x="etiqueta", y="pct",
-                    color="pct", color_continuous_scale="RdYlGn_r",
-                    title="Informalidad por nivel educativo (%, ponderada)",
-                    labels={"pct": "% Informal", "etiqueta": ""},
-                    text="pct",
-                )
-                fig_edu.update_traces(texttemplate="%{text:.0f}%", textposition="outside")
-                fig_edu.update_layout(coloraxis_showscale=False, height=340,
-                                       xaxis_tickangle=-35, margin=dict(t=40, b=80),
-                                       yaxis_range=[0, 110])
-                st.plotly_chart(fig_edu, use_container_width=True)
-
-        with c4:
-            if "P6040" in df.columns:
-                df_age = df[df["P6040"].between(15, 74)].copy()
-                df_age["EDAD_Q"] = pd.cut(
-                    df_age["P6040"],
-                    bins=range(14, 76, 5),
-                    labels=[f"{i}-{i+4}" for i in range(15, 75, 5)],
-                )
-                t_edad = (
-                    df_age[df_age["EDAD_Q"].notna()]
-                    .groupby("EDAD_Q", observed=True)
-                    .apply(tasa_pond_grp, include_groups=False)
-                    .reset_index()
-                    .rename(columns={0: "tasa"})
-                )
-                t_edad["pct"] = t_edad["tasa"].round(1)
-                fig_edad = go.Figure()
-                fig_edad.add_trace(go.Scatter(
-                    x=t_edad["EDAD_Q"].astype(str),
-                    y=t_edad["pct"],
-                    mode="lines+markers+text",
-                    line=dict(color="#E05C5C", width=2.5),
-                    marker=dict(size=8),
-                    fill="tozeroy",
-                    fillcolor="rgba(224,92,92,0.10)",
-                    text=t_edad["pct"].astype(str) + "%",
-                    textposition="top center",
-                ))
-                fig_edad.update_layout(
-                    title="Informalidad por grupo de edad (%, ponderada)",
-                    xaxis_title="Grupo de edad",
-                    yaxis_title="% Informal",
-                    height=340,
-                    margin=dict(t=40, b=40),
-                    yaxis_range=[0, 100],
-                )
-                st.plotly_chart(fig_edad, use_container_width=True)
-
-        # Fila 4: Distribución de ingresos (si disponible)
-        if "INGLABO" in df.columns:
-            df_ing  = df[df["INGLABO"].notna() & (df["INGLABO"] > 0)].copy()
-            df_samp = df_ing.sample(min(6000, len(df_ing)), random_state=42)
-            df_samp["Condición"] = df_samp["INFORMAL"].map({0: "Formal", 1: "Informal"})
-            df_samp["log_ing"]   = np.log1p(df_samp["INGLABO"])
-            fig_violin = px.violin(
-                df_samp, x="Condición", y="log_ing",
-                color="Condición",
-                color_discrete_map={"Formal": "#2196F3", "Informal": "#FF5722"},
-                box=True,
-                title="Distribución de log(Ingreso laboral) por condición de empleo",
-                labels={"log_ing": "log(INGLABO + 1)", "Condición": ""},
-            )
-            fig_violin.update_layout(height=360, showlegend=False, margin=dict(t=40, b=10))
-            st.plotly_chart(fig_violin, use_container_width=True)
-
-        # ── Scatter bivariado: separación Formal vs Informal ──────────────
-        if "P6040" in df.columns and "P3042" in df.columns:
-            st.divider()
-            st.markdown("#### 📈 Separación bivariada — Formal vs Informal")
-            st.caption(
-                "Muestra de 6 000 trabajadores. **Rojo** = Informal (arriba) · **Azul** = Formal (abajo). "
-                "La línea oscura muestra cómo cambia la probabilidad de informalidad a lo largo de cada variable."
+            # KPI: dos números grandes en lugar de gráfica
+            z1, z2 = st.columns(2)
+            z1.metric("Cabecera Municipal", f"{pct_cab:.1f}%")
+            z2.metric("Rural", f"{pct_rur:.1f}%",
+                      delta=f"+{diferencia:.0f} pp", delta_color="inverse")
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(
+                f"> **Hallazgo:** Vivir en zona rural incrementa la informalidad "
+                f"en **{diferencia:.0f} puntos porcentuales**, independientemente "
+                f"del sector y el nivel educativo."
             )
 
-            MAPA_EDU_SC = {1:0, 2:1, 3:3, 4:5, 5:7, 6:9, 7:10,
-                           8:11, 9:14, 10:16, 11:17, 12:18, 13:21}
-
-            df_sc = df[df["INFORMAL"].notna()].copy()
-            df_sc = df_sc.sample(min(6000, len(df_sc)), random_state=42)
-            df_sc["Condición"] = df_sc["INFORMAL"].map({0: "Formal", 1: "Informal"})
-            df_sc["anios_edu"] = df_sc["P3042"].map(MAPA_EDU_SC)
-
-            rng = np.random.default_rng(42)
-            df_sc["y_jit"] = (
-                df_sc["INFORMAL"].astype(float)
-                + rng.uniform(-0.07, 0.07, len(df_sc))
-            )
-
-            COLORES_SC = {"Formal": "#2196F3", "Informal": "#E05C5C"}
-
-            def tendencia_biv(sub, x_col, n_bins=18):
-                clean = sub.dropna(subset=[x_col, "INFORMAL"])
-                bins  = pd.cut(clean[x_col], bins=n_bins)
-                prop  = (
-                    clean.groupby(bins, observed=True)["INFORMAL"]
-                    .agg(["mean", "count"])
-                )
-                prop  = prop[prop["count"] >= 10]
-                x_c   = np.array([iv.mid for iv in prop.index])
-                y_p   = prop["mean"].values
-                orden = np.argsort(x_c)
-                return x_c[orden], y_p[orden]
-
-            def scatter_biv(x_col, x_label, key):
-                fig = go.Figure()
-                sub = df_sc.dropna(subset=[x_col])
-
-                for cond, color in COLORES_SC.items():
-                    mask = sub["Condición"] == cond
-                    fig.add_trace(go.Scatter(
-                        x=sub.loc[mask, x_col],
-                        y=sub.loc[mask, "y_jit"],
-                        mode="markers",
-                        name=cond,
-                        marker=dict(
-                            color=color, size=5, opacity=0.38,
-                            line=dict(color="white", width=0.3),
-                        ),
-                        hovertemplate=(
-                            f"<b>{cond}</b><br>{x_label}: %{{x:.1f}}<extra></extra>"
-                        ),
-                    ))
-
-                x_c, y_p = tendencia_biv(sub, x_col)
-                if len(x_c) > 1:
-                    fig.add_trace(go.Scatter(
-                        x=x_c, y=y_p,
-                        mode="lines",
-                        line=dict(color="#2C3E50", width=3.5),
-                        showlegend=False,
-                        hovertemplate=(
-                            f"{x_label}: %{{x:.1f}}<br>"
-                            "P(Informal): %{y:.2f}<extra></extra>"
-                        ),
-                    ))
-
-                fig.update_layout(
-                    xaxis_title=x_label,
-                    yaxis=dict(
-                        title="Condición",
-                        tickvals=[0, 1],
-                        ticktext=["Formal", "Informal"],
-                        range=[-0.2, 1.2],
-                        gridcolor="white",
-                        gridwidth=1.5,
-                        zeroline=False,
-                        tickfont=dict(size=12, color="#333"),
-                    ),
-                    plot_bgcolor="#EBEBEB",
-                    paper_bgcolor="white",
-                    font=dict(family="Arial, sans-serif", size=11, color="#333"),
-                    legend=dict(
-                        bgcolor="rgba(255,255,255,0.88)",
-                        bordercolor="#BBBBBB", borderwidth=1,
-                        font=dict(size=11),
-                        orientation="h",
-                        x=0.5, xanchor="center", y=1.10,
-                    ),
-                    height=390,
-                    margin=dict(t=40, b=45, l=70, r=15),
-                    hovermode="closest",
-                )
-                fig.update_xaxes(
-                    gridcolor="white", gridwidth=1.5,
-                    zeroline=False, tickfont=dict(size=10),
-                )
-                return fig
-
-            sc1, sc2, sc3 = st.columns(3)
-            with sc1:
-                st.markdown("**A · Educación**")
-                st.plotly_chart(
-                    scatter_biv("anios_edu", "Años de educación", "a"),
-                    use_container_width=True, key="scatter_edu_ing",
-                )
-            with sc2:
-                st.markdown("**B · Edad**")
-                st.plotly_chart(
-                    scatter_biv("P6040", "Edad (años)", "b"),
-                    use_container_width=True, key="scatter_edad_ing",
-                )
-            with sc3:
-                st.markdown("**C · Horas trabajadas**")
-                st.plotly_chart(
-                    scatter_biv("P6800", "Horas / semana", "c"),
-                    use_container_width=True, key="scatter_horas_ing",
-                )
-
-        # ── Top 5 SHAP: cómo dividen la informalidad ─────────────────────
+        # ═══════════════════════════════════════════════════════════
+        # ④ SECTOR ECONÓMICO
+        # ═══════════════════════════════════════════════════════════
         st.divider()
-        st.markdown("#### 🎯 Top 5 variables SHAP — ¿Cómo dividen la informalidad?")
+        st.markdown("### En agricultura y hogares, ser informal es la norma — no la excepción")
         st.caption(
-            "Cada línea conecta la tasa de informalidad ponderada (%) para cada categoría del predictor. "
-            "La línea punteada es el promedio nacional de referencia. "
-            "Cuanto más pronunciada la curva, mayor poder de separación tiene esa variable."
+            "Solo los 8 sectores con mayor presencia de independientes. "
+            "Los tres más informales resaltados en negro. "
+            "La línea vertical es el promedio nacional."
         )
-        tasa_global_eda = (df["INFORMAL"] * df["FEX_C18"]).sum() / df["FEX_C18"].sum() * 100
+
+        LABELS_RAMA_CORTO = {
+            1: "Agricultura / Pesca",   5: "Minería",
+            10: "Manufactura",          36: "Agua y servicios",
+            41: "Construcción",         45: "Comercio",
+            49: "Transporte",           55: "Restaurantes / Hoteles",
+            58: "Comunicaciones",       64: "Finanzas",
+            68: "Inmobiliario",         75: "Veterinaria",
+            78: "Servicios adm.",       84: "Adm. pública",
+            85: "Educación",            86: "Salud",
+            90: "Artes / Entretenimiento", 97: "Hogares c/serv. dom.",
+            99: "Otro / NS",
+        }
+        top_ramas = df["RAMA2D_R4"].value_counts().head(8).index
+        tasa_rama = (
+            df[df["RAMA2D_R4"].isin(top_ramas)]
+            .groupby("RAMA2D_R4", observed=True)
+            .apply(tasa_pond_grp, include_groups=False)
+            .reset_index().rename(columns={0: "tasa"}).sort_values("tasa")
+        )
+        tasa_rama["etiqueta"] = tasa_rama["RAMA2D_R4"].map(LABELS_RAMA_CORTO).fillna(
+            "Sector " + tasa_rama["RAMA2D_R4"].astype(str)
+        )
+        tasa_rama["pct"] = tasa_rama["tasa"].round(1)
+        n_r = len(tasa_rama)
+
+        # Solo top 3 oscuras — resto muy claro
+        rama_cols  = [NEGRO if i >= n_r - 3 else GRIS_C for i in range(n_r)]
+        # Solo etiqueta en las top 3
+        rama_texts = [
+            f"<b>{v:.0f}%</b>" if i >= n_r - 3 else ""
+            for i, v in enumerate(tasa_rama["pct"])
+        ]
+
+        fig_rama = go.Figure(go.Bar(
+            x=tasa_rama["pct"], y=tasa_rama["etiqueta"],
+            orientation="h",
+            marker_color=rama_cols,
+            text=rama_texts, textposition="outside",
+            textfont=dict(size=18, family="Arial Black, Arial Bold, Arial", color="#111111"),
+        ))
+        fig_rama.add_vline(x=tasa_global, line_dash="dot",
+                           line_color="#555555", line_width=2,
+                           annotation_text=f"promedio: {tasa_global:.0f}%",
+                           annotation_position="top right",
+                           annotation_font=dict(size=12, color="#555555"),
+                           annotation_bgcolor="white")
+        fig_rama.update_layout(
+            xaxis=dict(
+                range=[0, 122], ticksuffix="%",
+                showgrid=False, zeroline=False,
+                tickfont=dict(size=12, color="#777777"),
+            ),
+            yaxis=dict(
+                tickfont=dict(size=15, family="Arial", color="#111111"),
+                showgrid=False,
+            ),
+            plot_bgcolor="white", paper_bgcolor="white",
+            height=420, showlegend=False,
+            margin=dict(t=20, b=20, l=220, r=95),
+        )
+        st.plotly_chart(fig_rama, use_container_width=True, key="dash_rama")
+
+        top_sector = tasa_rama.iloc[-1]
+        st.markdown(
+            f"> **Hallazgo:** **{top_sector['etiqueta']}** tiene la tasa más alta con "
+            f"**{top_sector['pct']:.0f}%** de informalidad. "
+            f"Los tres sectores críticos superan el promedio nacional en más de 5 puntos."
+        )
+
+        # ═══════════════════════════════════════════════════════════
+        # ⑤ INTERACCIÓN — Microempresa × Tipo de contrato
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        st.markdown(
+            "### Un contrato escrito en microempresa reduce la informalidad 85 puntos"
+        )
+        st.caption(
+            "Barras negras = microempresas · Barras grises = empresas grandes. "
+            "Dentro de cada grupo, la ALTURA muestra el efecto del tipo de contrato."
+        )
         st.plotly_chart(
-            build_shap_division_chart(df, tasa_global_eda),
+            build_interaction_chart(df, tasa_global),
             use_container_width=True,
-            key="shap_division_eda",
+            key="interaction_dash",
+        )
+        st.markdown(
+            "> **Intervención clave:** Focalizar inspecciones y programas de "
+            "contractualización escrita en **microempresas** genera el mayor impacto "
+            "por peso invertido. Combina los predictores SHAP #1 (tamaño) y #2 (contrato)."
         )
 
-        # ── Efecto de interacción: Microempresa × Tipo de contrato ───────
-        if "P3069" in df.columns and "P6450" in df.columns:
-            st.divider()
-            st.markdown("#### 🔗 Efecto de interacción — Microempresa × Tipo de contrato")
-            st.caption(
-                "Las dos variables más importantes del modelo (SHAP #1 y #2) **no son independientes**: "
-                "dentro de una microempresa, pasar de contrato verbal a escrito reduce la informalidad "
-                "de forma drástica. La intervención de mayor impacto es **formalizar el contrato** "
-                "en empresas pequeñas, no solo fiscalizar el tamaño."
-            )
-            st.plotly_chart(
-                build_interaction_chart(df, tasa_global_eda),
-                use_container_width=True,
-                key="interaction_micro_contrato",
-            )
-            with st.expander("¿Qué significa esto para política pública?"):
-                st.markdown("""
-**Lectura del gráfico:**
-- Una barra **roja alta** con contrato verbal en microempresa confirma el perfil clásico de informalidad.
-- La barra **roja más baja** con contrato escrito muestra que la formalización contractual *dentro de la misma microempresa* protege significativamente.
-- Las barras **azules** (gran empresa) son consistentemente más bajas, pero también se benefician del contrato escrito.
 
-**Implicación directa para el Ministerio del Trabajo:**
-> Focalizar las inspecciones laborales y los incentivos de contractualización escrita en **microempresas del sector informal**
-> produce mayor impacto que cualquier otra intervención, porque combina el efecto del predictor #1 (tamaño)
-> con el predictor #2 (tipo de contrato).
-""")
+# ════════════════════════════════════════════════════════════════════════
+# TAB 3 — Informalidad por departamento
+# ════════════════════════════════════════════════════════════════════════
+with tab_dpto:
+    st.markdown(
+        "### Los departamentos del Caribe y la Amazonia concentran "
+        "la informalidad entre trabajadores independientes"
+    )
+    st.caption(
+        "Tasa ponderada por FEX_C18 · GEIH 2024 · Trabajadores por cuenta propia (P6430 = 4). "
+        "**Rojo** = sobre el promedio · **Amarillo** = cerca del promedio · **Azul** = bajo el promedio. "
+        "Borde negro = Top 5 más y menos informales."
+    )
+
+    if df is None:
+        st.info("Ejecuta los notebooks para cargar datos reales.")
+    else:
+        zona_sel = st.radio(
+            "Filtrar por zona", ["Todas", "Cabecera municipal", "Rural"],
+            horizontal=True,
+        )
+        df_d = df.copy()
+        if zona_sel == "Cabecera municipal":
+            df_d = df_d[df_d["CLASE"] == 1]
+        elif zona_sel == "Rural":
+            df_d = df_d[df_d["CLASE"] == 2]
+
+        tasa_dpto = (
+            df_d[df_d["DPTO"].notna()]
+            .groupby("DPTO", observed=True)
+            .apply(tasa_pond_grp, include_groups=False)
+            .reset_index().rename(columns={0: "tasa"})
+        )
+        tasa_dpto["DPTO"]   = tasa_dpto["DPTO"].astype(int)
+        tasa_dpto["nombre"] = tasa_dpto["DPTO"].map(
+            lambda d: DPTO_INFO.get(d, (str(d), 0, 0))[0]
+        )
+        tasa_dpto["pct"] = tasa_dpto["tasa"].round(1)
+        tasa_dpto        = tasa_dpto.sort_values("pct", ascending=True).reset_index(drop=True)
+
+        tasa_nac = (
+            df_d["INFORMAL"] * df_d["FEX_C18"]
+        ).sum() / df_d["FEX_C18"].sum() * 100
+
+        n = len(tasa_dpto)
+        TOP5_ALTO = 5   # los más informales (últimas filas → arriba del chart)
+        TOP5_BAJO = 5   # los menos informales (primeras filas → abajo del chart)
+
+        # ── 3 colores según distancia al promedio ─────────────────────────
+        ROJO     = "#C0392B"   # sobre promedio
+        AMARILLO = "#E8A838"   # cerca del promedio
+        AZUL     = "#2980B9"   # bajo promedio
+
+        def _col_dpto(pct):
+            if pct >= tasa_nac + 4:   return ROJO
+            elif pct >= tasa_nac - 4: return AMARILLO
+            else:                     return AZUL
+
+        colores = [_col_dpto(v) for v in tasa_dpto["pct"]]
+
+        # ── Bordes: Top 5 alto (últimos N) y Top 5 bajo (primeros N) ──────
+        borde_color = [
+            "#111111" if i >= n - TOP5_ALTO or i < TOP5_BAJO else "rgba(0,0,0,0)"
+            for i in range(n)
+        ]
+        borde_ancho = [
+            2.5 if i >= n - TOP5_ALTO or i < TOP5_BAJO else 0
+            for i in range(n)
+        ]
+
+        # ── Etiquetas: negrita en Top/Bottom 5, normal en el resto ────────
+        labels = [
+            f"<b>{v:.1f}%</b>" if i >= n - TOP5_ALTO or i < TOP5_BAJO else f"{v:.0f}%"
+            for i, v in enumerate(tasa_dpto["pct"])
+        ]
+
+        fig_d = go.Figure(go.Bar(
+            x=tasa_dpto["pct"],
+            y=tasa_dpto["nombre"],
+            orientation="h",
+            marker=dict(
+                color=colores,
+                line=dict(color=borde_color, width=borde_ancho),
+            ),
+            text=labels,
+            textposition="outside",
+            textfont=dict(size=12, family="Arial Bold, Arial", color="#111111"),
+            hovertemplate="<b>%{y}</b><br>Informalidad: <b>%{x:.1f}%</b><extra></extra>",
+            cliponaxis=False,
+        ))
+
+        # ── Línea de promedio — prominente ────────────────────────────────
+        fig_d.add_vline(
+            x=tasa_nac,
+            line_dash="solid", line_color="#333333", line_width=2.5,
+        )
+        fig_d.add_annotation(
+            x=tasa_nac, y=1.01, xref="x", yref="paper",
+            text=f"<b>Promedio nacional<br>{tasa_nac:.1f}%</b>",
+            showarrow=False, xanchor="center",
+            font=dict(size=13, color="#111111"),
+            bgcolor="white",
+            bordercolor="#333333", borderwidth=1.5, borderpad=5,
+        )
+
+        # ── Etiquetas de grupo Top/Bottom ──────────────────────────────────
+        fig_d.add_annotation(
+            x=tasa_dpto.iloc[-1]["pct"] + 1,
+            y=tasa_dpto.iloc[-3]["nombre"],
+            text="<b>⬆ 5 más<br>informales</b>",
+            showarrow=False, xanchor="left",
+            font=dict(size=11, color=ROJO),
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor=ROJO, borderwidth=1.5, borderpad=4,
+        )
+        fig_d.add_annotation(
+            x=tasa_dpto.iloc[0]["pct"] + 1,
+            y=tasa_dpto.iloc[2]["nombre"],
+            text="<b>⬇ 5 menos<br>informales</b>",
+            showarrow=False, xanchor="left",
+            font=dict(size=11, color=AZUL),
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor=AZUL, borderwidth=1.5, borderpad=4,
+        )
+
+        fig_d.update_layout(
+            xaxis=dict(
+                title="<b>Tasa de informalidad (%)</b>",
+                range=[0, 122],
+                ticksuffix="%",
+                gridcolor="#F0F0F0", gridwidth=1,
+                zeroline=False,
+                tickfont=dict(size=12, color="#555555"),
+            ),
+            yaxis=dict(
+                tickfont=dict(size=13, family="Arial", color="#111111"),
+                showgrid=False,
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            height=1000,
+            margin=dict(l=160, r=140, t=60, b=30),
+            font=dict(family="Arial, sans-serif"),
+            bargap=0.22,
+        )
+        st.plotly_chart(fig_d, use_container_width=True, key="dpto_bar")
+
+        # ── Lectura narrativa ──────────────────────────────────────────────
+        top5    = tasa_dpto.tail(5)["nombre"].tolist()
+        bottom5 = tasa_dpto.head(5)["nombre"].tolist()
+        st.markdown(
+            f"> **Lectura:** Los departamentos con mayor informalidad entre independientes son "
+            f"**{', '.join(top5[:-1])} y {top5[-1]}**, todos superando el promedio nacional. "
+            f"Los de menor informalidad son **{', '.join(bottom5[:-1])} y {bottom5[-1]}**, "
+            f"posiblemente por mayor densidad urbana y acceso a programas de formalización."
+        )
+
+        with st.expander("Ver tablas de ranking completo"):
+            d1, d2 = st.columns(2)
+            with d1:
+                st.markdown("**Top 10 — Mayor informalidad**")
+                st.dataframe(
+                    tasa_dpto[["nombre", "pct"]]
+                        .sort_values("pct", ascending=False).head(10)
+                        .rename(columns={"nombre": "Departamento", "pct": "% Informal"})
+                        .reset_index(drop=True),
+                    use_container_width=True, height=310,
+                )
+            with d2:
+                st.markdown("**Top 10 — Menor informalidad**")
+                st.dataframe(
+                    tasa_dpto[["nombre", "pct"]]
+                        .sort_values("pct", ascending=True).head(10)
+                        .rename(columns={"nombre": "Departamento", "pct": "% Informal"})
+                        .reset_index(drop=True),
+                    use_container_width=True, height=310,
+                )
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 4 — Desempeño del Modelo
@@ -1246,8 +1372,6 @@ with tab_modelo:
         st.markdown("#### Comparativa de modelos — test set (n = 70 345)")
         st.dataframe(
             df_metr.style
-                .highlight_max(subset=["F1", "AUC-ROC", "Precision", "Recall"],
-                               color="#d4edda")
                 .format({"F1": "{:.4f}", "AUC-ROC": "{:.4f}",
                          "Precision": "{:.4f}", "Recall": "{:.4f}"}),
             use_container_width=True,
@@ -1294,27 +1418,30 @@ with tab_modelo:
 
     st.divider()
     st.markdown("""
-    **Interpretación del modelo campeón (LightGBM):**
+    **Interpretación del modelo campeón — Trabajadores independientes (LightGBM):**
 
-    | Variable | Dirección del impacto | Importancia SHAP |
+    | Variable | Dirección del impacto | Importancia SHAP (referencial) |
     |---|---|---|
-    | Microempresa (≤10 empleados) | ↑ Mayor informalidad | **#1** (1.66) |
-    | Contrato verbal | ↑ Mayor informalidad | **#2** (0.58) |
-    | Años de educación | ↓ Reduce informalidad | **#3** (0.56) |
-    | Tamaño del establecimiento | ↓ Mayor empresa = menor riesgo | **#4** (0.51) |
-    | Departamento | Varía por región | **#5** (0.40) |
-    | Cuenta propia | ↑ Mayor informalidad | **#6** (0.40) |
-    | Edad | ↑ Curva no lineal (jóvenes y mayores) | **#7** (0.37) |
+    | Microempresa (≤10 empleados) | ↑ Mayor informalidad | **#1** |
+    | Años de educación | ↓ Reduce informalidad | **#2** |
+    | Departamento (enc.) | Varía por región | **#3** |
+    | Tamaño del establecimiento | ↓ Mayor empresa = menor riesgo | **#4** |
+    | Rama de actividad (enc.) | Varía por sector | **#5** |
+    | Edad | Curva no lineal (jóvenes y mayores) | **#6** |
+    | Horas / semana | ↓ Más horas = menor riesgo | **#7** |
+
+    > Los valores SHAP exactos se actualizan al reentrenar el modelo con la nueva muestra de trabajadores independientes.
     """)
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 5 — Predicción Individual
 # ══════════════════════════════════════════════════════════════════════════
 with tab_pred:
-    st.subheader("Estima la probabilidad de informalidad de un trabajador")
-    st.markdown(
-        "Ingresa las características de un trabajador para obtener su **score de riesgo de informalidad** "
-        "según el modelo LightGBM entrenado sobre GEIH 2024."
+    st.subheader("Estima la probabilidad de informalidad de un trabajador independiente")
+    st.info(
+        "**Modelo entrenado exclusivamente sobre trabajadores independientes (Cuenta propia · P6430 = 4).** "
+        "Ingresa las características del trabajador para obtener su score de riesgo de informalidad "
+        "según LightGBM entrenado sobre GEIH 2024."
     )
 
     if model is None or preprocessor is None:
@@ -1324,8 +1451,8 @@ with tab_pred:
 
         with col_l:
             st.markdown("**Datos demográficos**")
-            edad      = st.slider("Edad (años)", 15, 75, 32)
-            anios_edu = st.slider("Años de educación acumulados", 0, 25, 11)
+            edad      = st.slider("Edad (años)", 15, 75, 35)
+            anios_edu = st.slider("Años de educación acumulados", 0, 25, 9)
             sexo_lbl  = st.selectbox("Sexo", ["Hombre", "Mujer"])
             p3271     = 1 if sexo_lbl == "Hombre" else 2
             ecivil_lbl = st.selectbox("Estado civil", list(ESTADO_CIVIL.values()))
@@ -1337,21 +1464,19 @@ with tab_pred:
 
         with col_r:
             st.markdown("**Datos laborales**")
-            pos_lbl   = st.selectbox("Posición ocupacional", list(POSICION.values()))
-            p6430     = {v: k for k, v in POSICION.items()}[pos_lbl]
-            cont_lbl  = st.selectbox("Tipo de contrato", list(CONTRATO_TIPO.values()))
+            cont_lbl  = st.selectbox("Tipo de contrato / acuerdo", list(CONTRATO_TIPO.values()))
             p6450     = {v: k for k, v in CONTRATO_TIPO.items()}[cont_lbl]
-            p6800     = st.slider("Horas trabajadas / semana", 1, 100, 48)
-            tam_lbl   = st.selectbox("Tamaño del establecimiento", list(TAMANO_EMP.values()))
+            p6800     = st.slider("Horas trabajadas / semana", 1, 100, 40)
+            tam_lbl   = st.selectbox("Tamaño del establecimiento donde trabaja", list(TAMANO_EMP.values()))
             p3069     = {v: k for k, v in TAMANO_EMP.items()}[tam_lbl]
             rama_lbl  = st.selectbox("Rama de actividad (CIIU)", list(RAMA_CIIU.values()))
             rama      = {v: k for k, v in RAMA_CIIU.items()}[rama_lbl]
-            pluriemp  = st.checkbox("¿Tiene otro empleo adicional (pluriempleo)?", value=False)
+            pluriemp  = st.checkbox("¿Tiene otro trabajo adicional (pluriempleo)?", value=False)
             p7040_val = 1 if pluriemp else 0
 
         input_raw = construir_input(
-            p6040=edad,    p3271=p3271,  p6070=p6070,  clase=clase,  dpto=dpto,
-            p6430=p6430,   p6450=p6450,  p6800=p6800,  p3069=p3069,  rama=rama,
+            p6040=edad,   p3271=p3271,  p6070=p6070,  clase=clase,  dpto=dpto,
+            p6450=p6450,  p6800=p6800,  p3069=p3069,  rama=rama,
             anios_edu=anios_edu, pluriempleo=p7040_val,
         )
 
@@ -1410,13 +1535,14 @@ with tab_pred:
 | Factor | Dirección | Impacto relativo |
 |---|---|---|
 | Microempresa (≤ 10 trabajadores) | ↑ Mayor riesgo | ★★★★★ |
-| Contrato verbal | ↑ Mayor riesgo | ★★★★☆ |
-| Cuenta propia / Jornalero | ↑ Mayor riesgo | ★★★★☆ |
-| Zona rural | ↑ Mayor riesgo (~15 pp) | ★★★☆☆ |
-| Sector agricultura / construcción | ↑ Mayor riesgo | ★★★☆☆ |
-| Años de educación | ↓ Reduce riesgo | ★★★★☆ |
+| Años de educación bajos | ↑ Mayor riesgo | ★★★★☆ |
+| Zona rural | ↑ Mayor riesgo | ★★★☆☆ |
+| Sector agricultura / construcción / hogares | ↑ Mayor riesgo | ★★★☆☆ |
+| Departamentos con alta informalidad estructural | ↑ Mayor riesgo | ★★★☆☆ |
+| Más horas semanales trabajadas | ↓ Reduce riesgo | ★★☆☆☆ |
 | Empresa grande (> 30 empleados) | ↓ Reduce riesgo | ★★★★☆ |
-| Contrato escrito / indefinido | ↓ Reduce riesgo | ★★★★★ |
+| Educación técnica / universitaria o más | ↓ Reduce riesgo | ★★★★☆ |
+| Zona cabecera municipal | ↓ Reduce riesgo | ★★★☆☆ |
                 """)
 
         except Exception as ex:
@@ -1434,41 +1560,51 @@ with st.expander("📌 Hallazgos clave y recomendaciones de política pública",
     with hall_col:
         st.markdown("#### 🔍 Hallazgos principales")
         st.markdown("""
-**1. Magnitud estructural:**
-El 56% de los trabajadores colombianos son informales (tasa ponderada DANE 2024). La informalidad afecta de manera desproporcionada a zonas rurales (~75%) vs cabeceras (~52%).
+**1. Magnitud entre independientes:**
+~85% de los trabajadores por cuenta propia en Colombia son informales (tasa ponderada DANE 2024).
+La formalidad entre independientes no es la norma — es la excepción.
 
-**2. Predictores dominantes (SHAP):**
-- Trabajar en microempresa (≤10 empleados) es el factor #1, con el mayor impacto individual.
-- El contrato verbal duplica el riesgo; el escrito lo reduce drásticamente.
-- Cada año adicional de educación reduce ~3 pp la probabilidad de informalidad.
+**2. La informalidad no es una elección:**
+El modelo muestra que el sector, el tamaño del establecimiento y la zona geográfica predicen la informalidad
+con AUC-ROC > 0.98. La "decisión" de ser informal está condicionada estructuralmente.
 
-**3. Geografía:**
-Departamentos como Vichada, Guainía y Vaupés superan el 85% de informalidad; Bogotá y Atlántico están por debajo del 45%.
+**3. Predictores dominantes (SHAP):**
+- Trabajar en microempresa (≤10 empleados) es el factor #1.
+- Cada año adicional de educación reduce significativamente el riesgo.
+- La geografía importa: departamentos como Vaupés y Vichada superan el 85%.
 
-**4. Sectores críticos:**
-Agricultura, construcción, hogares con servicio doméstico y comercio informal concentran las tasas más altas (>70%).
+**4. Sectores críticos entre independientes:**
+Agricultura, construcción, hogares con servicio doméstico y comercio informal
+concentran las tasas más altas (>85%).
 
 **5. Rendimiento del modelo:**
-LightGBM logra AUC-ROC = 0.985 y F1 = 0.958 — muy por encima de las metas del proyecto (AUC ≥ 0.80, F1 ≥ 0.75).
+LightGBM logra AUC-ROC ≥ 0.98 y F1 ≥ 0.95 — muy por encima de las metas (AUC ≥ 0.80, F1 ≥ 0.75).
         """)
 
     with rec_col:
         st.markdown("#### 💡 Recomendaciones accionables")
         st.markdown("""
+**Argumento central:**
+Los programas de formalización fallan cuando son universales.
+El modelo muestra que un independiente en microempresa rural agrícola tiene
+perfil completamente diferente al de uno urbano con educación técnica.
+Diseñar programas según ese perfil aumentaría su efectividad.
+
 **Para el Ministerio del Trabajo:**
-- Usar el score individual del modelo en operativos de inspección, priorizando microempresas rurales de los sectores agrícola y construcción.
-- Crear umbrales de score para escalonar el nivel de intervención: notificación (>40%), visita (>65%), sanción preventiva (>80%).
+- Usar el score de este modelo en operativos de inspección, priorizando
+  microempresas rurales de los sectores agrícola y de construcción.
+- Escalar intervención por score: orientación (>40%), visita (>65%), acompañamiento activo (>80%).
 
 **Para el SENA:**
-- Focalizar programas de capacitación y formalización en departamentos con tasa > 70% y en jóvenes (15-24 años) de zonas rurales.
-- Incentivar la transición de contratos verbales a escritos mediante asesoría gratuita en los municipios con mayor índice de informalidad.
+- Focalizar programas de formalización en departamentos con tasa > 75%
+  y en independientes jóvenes (15-24 años) de zonas rurales.
+- Diseñar rutas específicas por sector (ej. construcción vs. comercio) en vez
+  de convocatorias abiertas.
 
 **Para Planeación Nacional:**
-- Integrar el modelo en los sistemas de información del FILCO (Ministerio del Trabajo) para que los indicadores sean individuales, no solo agregados departamentales.
-- Re-entrenar el modelo con cada nueva ola anual de la GEIH para mantener vigencia.
-
-**Para la academia / investigación:**
-- Ampliar el análisis con datos longitudinales para medir el impacto de intervenciones de formalización sobre el score individual a lo largo del tiempo.
+- Integrar el modelo en el FILCO (Ministerio del Trabajo) para pasar de
+  indicadores agregados departamentales a scores individuales.
+- Reentrenar con cada nueva ola anual de la GEIH para mantener vigencia.
         """)
 
 st.caption(
