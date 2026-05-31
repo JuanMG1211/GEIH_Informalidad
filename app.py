@@ -136,6 +136,32 @@ def load_metrics():
         return pd.read_csv(METRICS_PATH)
     return None
 
+@st.cache_data(show_spinner=False, ttl=3600)
+def compute_shap_beeswarm():
+    """Carga modelo + test desde disco, calcula SHAP para 800 muestras.
+    Devuelve tipos serializables para el caché de Streamlit."""
+    try:
+        import shap as _shap, pickle as _pk
+        _mp = BASE / "outputs" / "champion_geih.pkl"
+        _tp = BASE / "parquet"  / "test.parquet"
+        if not _mp.exists() or not _tp.exists():
+            return None
+        with open(_mp, "rb") as fh:
+            _mdl = _pk.load(fh)
+        df_t = pd.read_parquet(_tp)
+        X_s  = df_t.drop("INFORMAL", axis=1).sample(
+            min(800, len(df_t)), random_state=42
+        )
+        sv = _shap.TreeExplainer(_mdl).shap_values(X_s)
+        sv = sv[1] if isinstance(sv, list) else sv
+        return {
+            "sv":   sv.tolist(),
+            "X":    X_s.values.tolist(),
+            "cols": X_s.columns.tolist(),
+        }
+    except Exception:
+        return None
+
 @st.cache_data(ttl=86400)
 def load_colombia_geojson():
     """Descarga GeoJSON de departamentos de Colombia e inyecta códigos DANE en properties.DANE."""
@@ -191,10 +217,11 @@ def tasa_pond_grp(g):
 
 # ── Helper: construir input para el preprocessor ─────────────────────────
 def construir_input(p6040, p3271, p6070, clase, dpto,
-                    p6450, p6800, p3069, rama,
+                    p6800, p3069, rama,
                     anios_edu, pluriempleo):
     """Construye el vector de entrada para el modelo de trabajadores independientes.
     El modelo fue entrenado exclusivamente sobre P6430 == 4 (Cuenta propia).
+    P6450 (tipo de contrato) excluida: proxy del target para trabajadores independientes.
     """
     mapa_edu = {1:0, 2:1, 3:3, 4:5, 5:7, 6:9, 7:10,
                 8:11, 9:14, 10:16, 11:17, 12:18, 13:21}
@@ -209,8 +236,8 @@ def construir_input(p6040, p3271, p6070, clase, dpto,
         "P6070":        p6070,
         "CLASE":        clase,
         "DPTO":         dpto,
-        "P6450":        p6450,
         "P6800":        p6800,
+        "P6450":        9,       # NS/NR — oculto; excluida de próxima versión del modelo
         "P3069":        p3069,
         "RAMA2D_R4":    rama,
         "MICROEMPRESA": int(p3069 in [1, 2, 3]),
@@ -1160,25 +1187,17 @@ with tab_dash:
         )
 
         # ═══════════════════════════════════════════════════════════
-        # ⑤ INTERACCIÓN — Microempresa × Tipo de contrato
+        # ⑤ CONCLUSIÓN — Estructura del riesgo
         # ═══════════════════════════════════════════════════════════
         st.divider()
+        st.markdown("### El riesgo de informalidad está determinado por condiciones estructurales")
         st.markdown(
-            "### Un contrato escrito en microempresa reduce la informalidad 85 puntos"
-        )
-        st.caption(
-            "Barras negras = microempresas · Barras grises = empresas grandes. "
-            "Dentro de cada grupo, la ALTURA muestra el efecto del tipo de contrato."
-        )
-        st.plotly_chart(
-            build_interaction_chart(df, tasa_global),
-            use_container_width=True,
-            key="interaction_dash",
-        )
-        st.markdown(
-            "> **Intervención clave:** Focalizar inspecciones y programas de "
-            "contractualización escrita en **microempresas** genera el mayor impacto "
-            "por peso invertido. Combina los predictores SHAP #1 (tamaño) y #2 (contrato)."
+            "> Los cuatro factores anteriores — tamaño del establecimiento, educación, "
+            "zona geográfica y sector económico — explican sistemáticamente quién es informal "
+            "y quién no. La informalidad entre trabajadores independientes **no es una elección**: "
+            "es el resultado predecible de las condiciones en que se trabaja. "
+            "Intervenir sobre esas condiciones, en lugar de diseñar programas universales, "
+            "aumentaría significativamente la efectividad de los programas de formalización."
         )
 
 
@@ -1405,11 +1424,161 @@ with tab_modelo:
             st.image(str(IMG_COMP), use_container_width=True)
 
     with img_c2:
-        if IMG_SHAP_BAR.exists():
-            st.markdown("#### Importancia de variables (|SHAP| medio)")
+        st.markdown("#### Importancia de variables del modelo (gain)")
+        if model is not None and meta is not None:
+            # Mapa completo de nombres legibles para todas las features OHE
+            _NOM = {
+                "P6040": "Edad",
+                "ANIOS_EDU": "Años de educación",
+                "P6800": "Horas / semana",
+                "P3271": "Sexo",
+                "CLASE": "Zona (urbana/rural)",
+                "MICROEMPRESA": "Microempresa (≤10 p.)",
+                "SUBEMPLEADO": "Subempleado (<32 h)",
+                "PLURIEMPLEO": "Pluriempleo",
+                "0": "Rama de actividad",
+                "1": "Departamento",
+                "EDAD_GRUPO_15-24": "Edad: 15–24",
+                "EDAD_GRUPO_25-34": "Edad: 25–34",
+                "EDAD_GRUPO_35-44": "Edad: 35–44",
+                "EDAD_GRUPO_45-54": "Edad: 45–54",
+                "EDAD_GRUPO_55-64": "Edad: 55–64",
+                "EDAD_GRUPO_65+":   "Edad: 65+",
+                "P6070_1.0": "Civil: No unido/a",
+                "P6070_2.0": "Civil: Unión libre",
+                "P6070_3.0": "Civil: Casado/a",
+                "P6070_4.0": "Civil: Separado/a",
+                "P6070_5.0": "Civil: Viudo/a",
+                "P6070_6.0": "Civil: NS/NR",
+                "P6450_1.0": "Contrato: Verbal",
+                "P6450_2.0": "Contrato: Escrito",
+                "P6450_9.0": "Contrato: NS/NR",
+                "P3069_1":  "Establ. 1 persona",
+                "P3069_2":  "Establ. 2–5 p.",
+                "P3069_3":  "Establ. 6–10 p.",
+                "P3069_4":  "Establ. 11–19 p.",
+                "P3069_5":  "Establ. 20–30 p.",
+                "P3069_6":  "Establ. 31–50 p.",
+                "P3069_7":  "Establ. 51–100 p.",
+                "P3069_8":  "Establ. 101–200 p.",
+                "P3069_9":  "Establ. 201+ p.",
+                "P3069_10": "Establ. tamaño NS",
+            }
+            feat_raw   = meta.get("feature_names", [])
+            feat_label = [_NOM.get(n, n) for n in feat_raw]
+            importances = model.feature_importances_
+
+            df_imp = (
+                pd.DataFrame({"Variable": feat_label, "Importancia": importances})
+                .sort_values("Importancia")
+                .tail(15)
+            )
+            fig_imp = go.Figure(go.Bar(
+                x=df_imp["Importancia"],
+                y=df_imp["Variable"],
+                orientation="h",
+                marker_color="#2196F3",
+                text=df_imp["Importancia"].round(0).astype(int).astype(str),
+                textposition="outside",
+                textfont=dict(size=12, color="#111111"),
+            ))
+            fig_imp.update_layout(
+                xaxis=dict(title="Importancia (gain)", showgrid=False, zeroline=False,
+                           tickfont=dict(size=11, color="#555555")),
+                yaxis=dict(tickfont=dict(size=13, family="Arial", color="#111111"),
+                           showgrid=False),
+                plot_bgcolor="white", paper_bgcolor="white",
+                height=480, showlegend=False,
+                margin=dict(l=185, r=60, t=20, b=30),
+            )
+            st.plotly_chart(fig_imp, use_container_width=True, key="shap_imp_live")
+        elif IMG_SHAP_BAR.exists():
             st.image(str(IMG_SHAP_BAR), use_container_width=True)
-        if IMG_SHAP_BEE.exists():
-            st.markdown("#### SHAP beeswarm — distribución de impactos")
+
+        st.markdown("#### SHAP beeswarm — distribución de impactos por variable")
+        _NOMB = {
+            "P6040": "Edad", "ANIOS_EDU": "Años de educación",
+            "P6800": "Horas / semana", "P3271": "Sexo",
+            "CLASE": "Zona (urbana/rural)", "MICROEMPRESA": "Microempresa (≤10 p.)",
+            "SUBEMPLEADO": "Subempleado (<32 h)", "PLURIEMPLEO": "Pluriempleo",
+            "0": "Rama de actividad", "1": "Departamento",
+            "EDAD_GRUPO_15-24": "Edad: 15–24", "EDAD_GRUPO_25-34": "Edad: 25–34",
+            "EDAD_GRUPO_35-44": "Edad: 35–44", "EDAD_GRUPO_45-54": "Edad: 45–54",
+            "EDAD_GRUPO_55-64": "Edad: 55–64", "EDAD_GRUPO_65+": "Edad: 65+",
+            "P6070_1.0": "Civil: No unido/a", "P6070_2.0": "Civil: Unión libre",
+            "P6070_3.0": "Civil: Casado/a",   "P6070_4.0": "Civil: Separado/a",
+            "P6070_5.0": "Civil: Viudo/a",     "P6070_6.0": "Civil: NS/NR",
+            "P6450_1.0": "Contrato: Verbal",   "P6450_2.0": "Contrato: Escrito",
+            "P6450_9.0": "Contrato: NS/NR",
+            "P3069_1": "Establ. 1 persona",    "P3069_2":  "Establ. 2–5 p.",
+            "P3069_3": "Establ. 6–10 p.",      "P3069_4":  "Establ. 11–19 p.",
+            "P3069_5": "Establ. 20–30 p.",     "P3069_6":  "Establ. 31–50 p.",
+            "P3069_7": "Establ. 51–100 p.",    "P3069_8":  "Establ. 101–200 p.",
+            "P3069_9": "Establ. 201+ p.",      "P3069_10": "Establ. tamaño NS",
+        }
+        _bee = compute_shap_beeswarm()
+        if _bee is not None:
+            _sv   = np.array(_bee["sv"])
+            _X    = np.array(_bee["X"])
+            _cols = _bee["cols"]
+            _labels = [_NOMB.get(c, c) for c in _cols]
+
+            # Top 15 por |SHAP| medio
+            _mean_abs = np.abs(_sv).mean(axis=0)
+            _top_idx  = np.argsort(_mean_abs)[-15:]
+
+            _sorted_labels = [_labels[i] for i in _top_idx]
+            _pos = {idx: pos for pos, idx in enumerate(_top_idx)}
+            _rng = np.random.default_rng(42)
+            _traces = []
+            for _i in _top_idx:
+                _sv_i   = _sv[:, _i]
+                _fv_i   = _X[:, _i]
+                _fmin, _fmax = _fv_i.min(), _fv_i.max()
+                _fnorm  = (_fv_i - _fmin) / (_fmax - _fmin + 1e-9)
+                _colors = [
+                    f"rgb({int(220*v+35)},{int(40*(1-v))},{int(220*(1-v)+35)})"
+                    for v in _fnorm
+                ]
+                _jit   = _rng.uniform(-0.28, 0.28, len(_sv_i))
+                _y_num = float(_pos[_i]) + _jit
+                _traces.append(go.Scatter(
+                    x=_sv_i,
+                    y=_y_num,
+                    mode="markers",
+                    marker=dict(color=_colors, size=3.5, opacity=0.45),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{_labels[_i]}</b><br>"
+                        "SHAP: %{x:.3f}<extra></extra>"
+                    ),
+                ))
+
+            _fig_bee = go.Figure(_traces)
+            _fig_bee.add_vline(x=0, line_color="#333333", line_width=1.2)
+            _fig_bee.update_layout(
+                xaxis=dict(
+                    title="<b>Valor SHAP</b>  (→ aumenta probabilidad informal · ← disminuye)",
+                    zeroline=False, showgrid=True, gridcolor="#F0F0F0",
+                    tickfont=dict(size=11, color="#555555"),
+                ),
+                yaxis=dict(
+                    tickvals=list(range(len(_sorted_labels))),
+                    ticktext=_sorted_labels,
+                    tickfont=dict(size=13, family="Arial", color="#111111"),
+                    showgrid=False,
+                    range=[-0.6, len(_sorted_labels) - 0.4],
+                ),
+                plot_bgcolor="white", paper_bgcolor="white",
+                height=500, showlegend=False,
+                margin=dict(l=185, r=20, t=15, b=55),
+            )
+            st.plotly_chart(_fig_bee, use_container_width=True, key="shap_bee_live")
+            st.caption(
+                "Cada punto = un trabajador de la muestra. "
+                "Color: **rojo** = valor alto de la variable · **azul** = valor bajo."
+            )
+        elif IMG_SHAP_BEE.exists():
             st.image(str(IMG_SHAP_BEE), use_container_width=True)
 
     if not any([IMG_CONFUSION.exists(), IMG_COMP.exists(),
@@ -1464,8 +1633,6 @@ with tab_pred:
 
         with col_r:
             st.markdown("**Datos laborales**")
-            cont_lbl  = st.selectbox("Tipo de contrato / acuerdo", list(CONTRATO_TIPO.values()))
-            p6450     = {v: k for k, v in CONTRATO_TIPO.items()}[cont_lbl]
             p6800     = st.slider("Horas trabajadas / semana", 1, 100, 40)
             tam_lbl   = st.selectbox("Tamaño del establecimiento donde trabaja", list(TAMANO_EMP.values()))
             p3069     = {v: k for k, v in TAMANO_EMP.items()}[tam_lbl]
@@ -1475,8 +1642,8 @@ with tab_pred:
             p7040_val = 1 if pluriemp else 0
 
         input_raw = construir_input(
-            p6040=edad,   p3271=p3271,  p6070=p6070,  clase=clase,  dpto=dpto,
-            p6450=p6450,  p6800=p6800,  p3069=p3069,  rama=rama,
+            p6040=edad,  p3271=p3271,  p6070=p6070,  clase=clase,  dpto=dpto,
+            p6800=p6800, p3069=p3069,  rama=rama,
             anios_edu=anios_edu, pluriempleo=p7040_val,
         )
 
