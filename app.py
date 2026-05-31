@@ -8,6 +8,7 @@ import pickle
 import joblib
 import json
 from pathlib import Path
+from groq import Groq
 
 st.set_page_config(
     page_title="Informalidad Laboral · Colombia 2024",
@@ -245,6 +246,51 @@ def construir_input(p6040, p3271, p6070, clase, dpto,
         "PLURIEMPLEO":  pluriempleo,
     }
     return pd.DataFrame([row])
+
+# ── Recomendaciones de política pública con Groq AI ───────────────────────
+def generar_recomendaciones_ia(api_key: str, perfil: dict, prob: float, riesgo: str) -> str:
+    """Llama a Groq (Llama 3.3 70B) para generar recomendaciones de política pública."""
+    client = Groq(api_key=api_key)
+
+    perfil_texto = "\n".join(f"- {k}: {v}" for k, v in perfil.items())
+
+    prompt = f"""Eres un asesor estratégico creativo del Ministerio de Trabajo de Colombia.
+Tu misión es diseñar intervenciones de política pública personalizadas y realizables
+para reducir la informalidad laboral de trabajadores independientes (cuenta propia).
+
+PERFIL DEL TRABAJADOR ANALIZADO:
+{perfil_texto}
+
+DIAGNÓSTICO DEL MODELO:
+- Probabilidad de informalidad: {prob:.1%}
+- Nivel de riesgo: {riesgo}
+
+CONTEXTO: Este trabajador fue clasificado como INFORMAL por un modelo LightGBM
+entrenado sobre la Gran Encuesta Integrada de Hogares (GEIH 2024) del DANE,
+con AUC-ROC de 0.95 y F1 de 0.96. La informalidad aquí significa no cotizar
+a pensión (P6920), lo que implica desprotección ante vejez, enfermedad y muerte.
+
+INSTRUCCIONES:
+1. Analiza cuál o cuáles factores del perfil son los determinantes principales de informalidad.
+2. Genera entre 5 y 7 recomendaciones concretas, innovadoras y accionables.
+3. Para cada recomendación incluye:
+   - Un título con impacto (usa lenguaje persuasivo y directo)
+   - La acción específica que debe tomar el Ministerio
+   - Por qué esta acción impacta directamente el perfil de este trabajador
+   - Una métrica de éxito que se pueda medir en 12 meses
+4. Cierra con una "Palanca crítica": el único cambio que, si se logra, tiene mayor probabilidad
+   de quebrar la cadena de informalidad para este perfil específico.
+
+Usa formato markdown con encabezados claros. Sé creativo pero realista con el contexto colombiano.
+No repitas el perfil en la respuesta. Ve directo a las recomendaciones. Responde en español."""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content
+
 
 # ── Gráfico: top 5 variables SHAP — cómo dividen la informalidad ─────────
 def build_shap_division_chart(df, tasa_global):
@@ -601,6 +647,27 @@ if meta:
     ic.metric("Variables del modelo", f"{meta.get('n_features', 0)}")
 
 st.divider()
+
+# ── Sidebar: configuración API ─────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## ⚙️ Configuración IA")
+    st.caption(
+        "Ingresa tu API Key de Groq para habilitar las "
+        "recomendaciones de política pública generadas por IA (Llama 3.3 70B). "
+        "Gratis en console.groq.com."
+    )
+    anthropic_api_key = st.text_input(
+        "API Key de Groq",
+        type="password",
+        placeholder="gsk_...",
+        help="Obtén tu clave gratis en console.groq.com. No se almacena en ningún servidor.",
+    )
+    if anthropic_api_key:
+        st.success("API Key cargada — recomendaciones IA activas")
+    else:
+        st.info("Sin API Key — recomendaciones IA desactivadas")
+    st.markdown("---")
+    st.caption("Proyecto Final · Maestría · GEIH 2024")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TABS
@@ -1591,13 +1658,13 @@ with tab_modelo:
 
     | Variable | Dirección del impacto | Importancia SHAP (referencial) |
     |---|---|---|
-    | Microempresa (≤10 empleados) | ↑ Mayor informalidad | **#1** |
-    | Años de educación | ↓ Reduce informalidad | **#2** |
-    | Departamento (enc.) | Varía por región | **#3** |
-    | Tamaño del establecimiento | ↓ Mayor empresa = menor riesgo | **#4** |
-    | Rama de actividad (enc.) | Varía por sector | **#5** |
-    | Edad | Curva no lineal (jóvenes y mayores) | **#6** |
-    | Horas / semana | ↓ Más horas = menor riesgo | **#7** |
+    | Años de educación | ↓ Reduce informalidad | **#1** |
+    | Departamento (enc.) | Varía por región | **#2** |
+    | Rama de actividad (enc.) | Varía por sector | **#3** |
+    | Edad | Curva no lineal (jóvenes y mayores) | **#4** |
+    | Horas / semana | ↓ Más horas = menor riesgo | **#5** |
+    | Zona (urbano/rural) | ↑ Rural = mayor riesgo | **#6** |
+    | Estado civil | Efecto social / responsabilidad | **#7** |
 
     > Los valores SHAP exactos se actualizan al reentrenar el modelo con la nueva muestra de trabajadores independientes.
     """)
@@ -1634,12 +1701,13 @@ with tab_pred:
         with col_r:
             st.markdown("**Datos laborales**")
             p6800     = st.slider("Horas trabajadas / semana", 1, 100, 40)
-            tam_lbl   = st.selectbox("Tamaño del establecimiento donde trabaja", list(TAMANO_EMP.values()))
-            p3069     = {v: k for k, v in TAMANO_EMP.items()}[tam_lbl]
             rama_lbl  = st.selectbox("Rama de actividad (CIIU)", list(RAMA_CIIU.values()))
             rama      = {v: k for k, v in RAMA_CIIU.items()}[rama_lbl]
             pluriemp  = st.checkbox("¿Tiene otro trabajo adicional (pluriempleo)?", value=False)
             p7040_val = 1 if pluriemp else 0
+
+        # Trabajadores independientes (cuenta propia) se consideran empleados únicos
+        p3069 = 1
 
         input_raw = construir_input(
             p6040=edad,  p3271=p3271,  p6070=p6070,  clase=clase,  dpto=dpto,
@@ -1684,16 +1752,65 @@ with tab_pred:
             fig_gauge.update_layout(height=300, margin=dict(t=60, b=10, l=20, r=20))
             st.plotly_chart(fig_gauge, use_container_width=True)
 
-            # Implicación de política
+            # ── Diagnóstico ────────────────────────────────────────────
             if pred == 1:
                 st.warning(
-                    f"**⚠️ Perfil de ALTO riesgo** — Probabilidad {prob:.1%}. "
+                    f"**⚠️ Perfil INFORMAL — Probabilidad {prob:.1%}.** "
                     "Este trabajador debería ser priorizado en programas del SENA, "
                     "inspecciones del Ministerio del Trabajo o subsidios de formalización."
                 )
+
+                # ── Recomendaciones IA ─────────────────────────────────
+                st.markdown("---")
+                st.markdown("#### 🤖 Recomendaciones de política pública generadas por IA")
+
+                if not anthropic_api_key:
+                    st.info(
+                        "Ingresa tu API Key de Claude en el panel lateral izquierdo "
+                        "para generar recomendaciones personalizadas con IA."
+                    )
+                else:
+                    perfil_legible = {
+                        "Edad":              f"{edad} años",
+                        "Sexo":              sexo_lbl,
+                        "Estado civil":      ecivil_lbl,
+                        "Años de educación": f"{anios_edu} años",
+                        "Zona":              zona_lbl,
+                        "Departamento":      dpto_lbl,
+                        "Horas / semana":    f"{p6800} h",
+                        "Rama de actividad": rama_lbl,
+                        "Subempleado":       "Sí (< 32 h/sem)" if p6800 < 32 else "No",
+                        "Pluriempleo":       "Sí" if pluriemp else "No",
+                    }
+
+                    if st.button(
+                        "Generar recomendaciones con IA",
+                        key="btn_ia_recom",
+                        type="primary",
+                    ):
+                        with st.spinner("Analizando el perfil y generando recomendaciones..."):
+                            try:
+                                texto_ia = generar_recomendaciones_ia(
+                                    anthropic_api_key, perfil_legible, prob, riesgo
+                                )
+                                st.session_state["recomendaciones_ia"] = texto_ia
+                            except Exception as e_ia:
+                                if "auth" in str(e_ia).lower() or "api key" in str(e_ia).lower() or "401" in str(e_ia):
+                                    st.error("API Key inválida. Verifica la clave de Groq en el panel lateral.")
+                                else:
+                                    st.error(f"Error al llamar a Groq API: {e_ia}")
+
+                    if "recomendaciones_ia" in st.session_state:
+                        st.markdown(st.session_state["recomendaciones_ia"])
+                        st.caption(
+                            "Recomendaciones generadas por Llama 3.3 70B (Groq) "
+                            "basadas en el perfil del trabajador y el contexto GEIH 2024. "
+                            "No constituyen asesoría oficial del Ministerio de Trabajo."
+                        )
+
             else:
                 st.success(
-                    f"**✅ Perfil FORMAL** — Probabilidad de informalidad {prob:.1%}. "
+                    f"**✅ Perfil FORMAL — Probabilidad de informalidad {prob:.1%}.** "
                     "El trabajador presenta características asociadas al empleo formal."
                 )
 
@@ -1701,15 +1818,14 @@ with tab_pred:
                 st.markdown("""
 | Factor | Dirección | Impacto relativo |
 |---|---|---|
-| Microempresa (≤ 10 trabajadores) | ↑ Mayor riesgo | ★★★★★ |
-| Años de educación bajos | ↑ Mayor riesgo | ★★★★☆ |
-| Zona rural | ↑ Mayor riesgo | ★★★☆☆ |
+| Años de educación bajos | ↑ Mayor riesgo | ★★★★★ |
+| Departamentos con alta informalidad estructural | ↑ Mayor riesgo | ★★★★☆ |
 | Sector agricultura / construcción / hogares | ↑ Mayor riesgo | ★★★☆☆ |
-| Departamentos con alta informalidad estructural | ↑ Mayor riesgo | ★★★☆☆ |
-| Más horas semanales trabajadas | ↓ Reduce riesgo | ★★☆☆☆ |
-| Empresa grande (> 30 empleados) | ↓ Reduce riesgo | ★★★★☆ |
-| Educación técnica / universitaria o más | ↓ Reduce riesgo | ★★★★☆ |
+| Zona rural | ↑ Mayor riesgo | ★★★☆☆ |
+| Pocas horas semanales (subempleo) | ↑ Mayor riesgo | ★★★☆☆ |
+| Educación técnica / universitaria o más | ↓ Reduce riesgo | ★★★★★ |
 | Zona cabecera municipal | ↓ Reduce riesgo | ★★★☆☆ |
+| Más horas semanales trabajadas | ↓ Reduce riesgo | ★★☆☆☆ |
                 """)
 
         except Exception as ex:
