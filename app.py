@@ -339,96 +339,6 @@ with st.sidebar:
     else:
         st.info("Sin API Key — recomendaciones IA desactivadas")
 
-    # ── Contexto de referencia ─────────────────────────────────────────
-    _df_ref = load_data()
-    if _df_ref is not None:
-        st.markdown("---")
-        st.markdown("### 📊 Referencia: % informalidad por educación")
-        st.caption("Tasa ponderada GEIH 2024 · cuenta propia")
-        _labels_edu_ref = {
-            1:"Ninguno", 2:"Preescolar", 3:"Primaria inc.", 4:"Primaria",
-            5:"Sec. inc.", 6:"Secundaria", 7:"Media inc.", 8:"Media",
-            9:"Técnica", 10:"Universidad", 11:"Especializ.", 12:"Maestría", 13:"Doctorado",
-        }
-        if "P3042" in _df_ref.columns and "FEX_C18" in _df_ref.columns:
-            _tasa_edu_ref = (
-                _df_ref[_df_ref["P3042"].notna()]
-                .groupby("P3042", observed=True)
-                .apply(tasa_pond_grp, include_groups=False)
-                .reset_index().rename(columns={0: "tasa"})
-            )
-            _tasa_edu_ref["nivel"] = _tasa_edu_ref["P3042"].map(_labels_edu_ref)
-            _tasa_edu_ref["pct"]   = _tasa_edu_ref["tasa"].round(1)
-            _tasa_edu_ref = _tasa_edu_ref[_tasa_edu_ref["P3042"] <= 13].copy()
-            st.dataframe(
-                _tasa_edu_ref[["nivel", "pct"]]
-                    .rename(columns={"nivel": "Nivel educativo", "pct": "% Informal"})
-                    .reset_index(drop=True),
-                use_container_width=True, hide_index=True, height=290,
-            )
-
-        st.markdown("### 🌍 Referencia: % informalidad por demografía")
-        st.caption("Tasa ponderada · cuenta propia")
-
-        # Zona
-        if "CLASE" in _df_ref.columns:
-            _t_zona = (
-                _df_ref[_df_ref["CLASE"].notna()]
-                .groupby("CLASE", observed=True)
-                .apply(tasa_pond_grp, include_groups=False)
-                .reset_index().rename(columns={0: "tasa"})
-            )
-            _t_zona["zona"] = _t_zona["CLASE"].map({1: "Cabecera", 2: "Rural"})
-            _t_zona["pct"]  = _t_zona["tasa"].round(1)
-            st.markdown("**Por zona**")
-            st.dataframe(
-                _t_zona[["zona", "pct"]]
-                    .rename(columns={"zona": "Zona", "pct": "% Informal"})
-                    .reset_index(drop=True),
-                use_container_width=True, hide_index=True, height=90,
-            )
-
-        # Sexo
-        if "P3271" in _df_ref.columns:
-            _t_sexo = (
-                _df_ref[_df_ref["P3271"].notna()]
-                .groupby("P3271", observed=True)
-                .apply(tasa_pond_grp, include_groups=False)
-                .reset_index().rename(columns={0: "tasa"})
-            )
-            _t_sexo["sexo"] = _t_sexo["P3271"].map({1: "Hombre", 2: "Mujer"})
-            _t_sexo["pct"]  = _t_sexo["tasa"].round(1)
-            st.markdown("**Por sexo**")
-            st.dataframe(
-                _t_sexo[["sexo", "pct"]]
-                    .rename(columns={"sexo": "Sexo", "pct": "% Informal"})
-                    .reset_index(drop=True),
-                use_container_width=True, hide_index=True, height=90,
-            )
-
-        # Grupo de edad
-        if "P6040" in _df_ref.columns:
-            _df_ref2 = _df_ref[_df_ref["P6040"].notna()].copy()
-            _df_ref2["EDAD_G"] = pd.cut(
-                _df_ref2["P6040"],
-                bins=[14,24,34,44,54,64,120],
-                labels=["15-24","25-34","35-44","45-54","55-64","65+"]
-            )
-            _t_edad = (
-                _df_ref2[_df_ref2["EDAD_G"].notna()]
-                .groupby("EDAD_G", observed=True)
-                .apply(tasa_pond_grp, include_groups=False)
-                .reset_index().rename(columns={0: "tasa"})
-            )
-            _t_edad["pct"] = _t_edad["tasa"].round(1)
-            st.markdown("**Por grupo de edad**")
-            st.dataframe(
-                _t_edad[["EDAD_G", "pct"]]
-                    .rename(columns={"EDAD_G": "Edad", "pct": "% Informal"})
-                    .reset_index(drop=True),
-                use_container_width=True, hide_index=True, height=210,
-            )
-
     st.markdown("---")
     st.caption("Proyecto Final · Maestría · GEIH 2025")
 
@@ -640,10 +550,16 @@ with tab_dash:
                 annotation_bgcolor="white",
             )
             fig_zona.update_layout(
-                yaxis=dict(range=[0, pct_rur + 20], ticksuffix="%",
-                           showticklabels=False,
-                           gridcolor="#F4F4F4", zeroline=False,
-                           tickfont=dict(size=12, color="#777777")),
+                yaxis=dict(
+                    title=dict(
+                        text="% de informalidad<br>según zona geográfica",
+                        font=dict(size=11, color="#555555"),
+                    ),
+                    range=[0, pct_rur + 20], ticksuffix="%",
+                    showticklabels=False,
+                    gridcolor="#F4F4F4", zeroline=False,
+                    tickfont=dict(size=12, color="#777777"),
+                ),
                 xaxis=dict(showgrid=False, tickfont=dict(size=14, color="#111111")),
                 plot_bgcolor="white", paper_bgcolor="white",
                 height=260, showlegend=False,
@@ -799,6 +715,10 @@ with tab_dash:
                 tickfont=dict(size=13, color="#111111"),
             ),
             yaxis=dict(
+                title=dict(
+                    text="% de informalidad<br>según edad",
+                    font=dict(size=11, color="#555555"),
+                ),
                 range=[0, max(tasa_edad["pct"]) + 18],
                 ticksuffix="%",
                 showticklabels=False,
@@ -1247,7 +1167,7 @@ with tab_pred:
     if model is None or preprocessor is None:
         st.error("Carga el modelo ejecutando `4.Modelamiento.ipynb` primero.")
     else:
-        col_l, col_r, col_ref = st.columns([4, 4, 5])
+        col_l, col_r = st.columns(2)
 
         with col_l:
             st.markdown("**Datos demográficos**")
@@ -1291,123 +1211,6 @@ with tab_pred:
             pluriemp  = st.checkbox("¿Tiene otro trabajo adicional (pluriempleo)?", value=False)
             p7040_val = 1 if pluriemp else 0
 
-        with col_ref:
-            if df is not None:
-                _ref_semaforo = lambda v, ref: (
-                    "#C0392B" if v >= ref + 10 else
-                    "#E67E22" if v >= ref else
-                    "#F1C40F" if v >= ref - 15 else "#27AE60"
-                )
-                _tasa_ref = (df["INFORMAL"] * df["FEX_C18"]).sum() / df["FEX_C18"].sum() * 100
-
-                # ── Gráfica 1: % informalidad según educación ────────────
-                st.markdown("**% informalidad según educación**")
-                _lbl_edu = {
-                    1:"Ninguno", 2:"Preescolar", 3:"Primaria inc.", 4:"Primaria",
-                    5:"Sec. inc.", 6:"Secundaria", 7:"Media inc.", 8:"Media",
-                    9:"Técnica", 10:"Universidad", 11:"Especializ.",
-                    12:"Maestría", 13:"Doctorado",
-                }
-                if "P3042" in df.columns:
-                    _te = (
-                        df[df["P3042"].notna()]
-                        .groupby("P3042", observed=True)
-                        .apply(tasa_pond_grp, include_groups=False)
-                        .reset_index().rename(columns={0: "tasa"})
-                    )
-                    _te["etiq"] = _te["P3042"].map(_lbl_edu)
-                    _te["pct"]  = _te["tasa"].round(1)
-                    _te = _te[_te["P3042"] <= 13].copy()
-
-                    _fig_edu_ref = go.Figure(go.Bar(
-                        y=_te["etiq"], x=_te["pct"],
-                        orientation="h",
-                        marker_color=[_ref_semaforo(v, _tasa_ref) for v in _te["pct"]],
-                        text=[f"<b>{v:.0f}%</b>" for v in _te["pct"]],
-                        textposition="outside",
-                        textfont=dict(size=10, color="#111111"),
-                    ))
-                    _fig_edu_ref.add_vline(
-                        x=_tasa_ref, line_dash="dot", line_color="#888",
-                        line_width=1.5,
-                    )
-                    _fig_edu_ref.update_layout(
-                        xaxis=dict(range=[0, 120], ticksuffix="%",
-                                   showgrid=False, zeroline=False,
-                                   tickfont=dict(size=9, color="#777")),
-                        yaxis=dict(tickfont=dict(size=10, color="#111"),
-                                   showgrid=False),
-                        plot_bgcolor="white", paper_bgcolor="white",
-                        height=320, showlegend=False,
-                        margin=dict(t=5, b=10, l=5, r=50),
-                    )
-                    st.plotly_chart(_fig_edu_ref, use_container_width=True,
-                                    key="ref_edu_pred")
-
-                # ── Gráfica 2: % informalidad según demografía ───────────
-                st.markdown("**% informalidad según demografía**")
-                _demog_labels, _demog_vals = [], []
-
-                if "CLASE" in df.columns:
-                    for _c, _n in [(1, "Cabecera"), (2, "Rural")]:
-                        _sub = df[df["CLASE"] == _c]
-                        if len(_sub):
-                            _demog_labels.append(_n)
-                            _demog_vals.append(
-                                (_sub["INFORMAL"]*_sub["FEX_C18"]).sum()
-                                / _sub["FEX_C18"].sum() * 100
-                            )
-
-                if "P3271" in df.columns:
-                    for _s, _n in [(1, "Hombre"), (2, "Mujer")]:
-                        _sub = df[df["P3271"] == _s]
-                        if len(_sub):
-                            _demog_labels.append(_n)
-                            _demog_vals.append(
-                                (_sub["INFORMAL"]*_sub["FEX_C18"]).sum()
-                                / _sub["FEX_C18"].sum() * 100
-                            )
-
-                if "P6040" in df.columns:
-                    _df_e = df[df["P6040"].notna()].copy()
-                    _df_e["EG"] = pd.cut(_df_e["P6040"],
-                                         bins=[14,24,34,44,54,64,120],
-                                         labels=["15-24","25-34","35-44",
-                                                 "45-54","55-64","65+"])
-                    for _g in ["15-24","25-34","35-44","45-54","55-64","65+"]:
-                        _sub = _df_e[_df_e["EG"].astype(str) == _g]
-                        if len(_sub):
-                            _demog_labels.append(_g)
-                            _demog_vals.append(
-                                (_sub["INFORMAL"]*_sub["FEX_C18"]).sum()
-                                / _sub["FEX_C18"].sum() * 100
-                            )
-
-                if _demog_labels:
-                    _fig_dem = go.Figure(go.Bar(
-                        y=_demog_labels, x=[round(v, 1) for v in _demog_vals],
-                        orientation="h",
-                        marker_color=[_ref_semaforo(v, _tasa_ref) for v in _demog_vals],
-                        text=[f"<b>{v:.0f}%</b>" for v in _demog_vals],
-                        textposition="outside",
-                        textfont=dict(size=10, color="#111111"),
-                    ))
-                    _fig_dem.add_vline(
-                        x=_tasa_ref, line_dash="dot", line_color="#888",
-                        line_width=1.5,
-                    )
-                    _fig_dem.update_layout(
-                        xaxis=dict(range=[0, 120], ticksuffix="%",
-                                   showgrid=False, zeroline=False,
-                                   tickfont=dict(size=9, color="#777")),
-                        yaxis=dict(tickfont=dict(size=10, color="#111"),
-                                   showgrid=False),
-                        plot_bgcolor="white", paper_bgcolor="white",
-                        height=280, showlegend=False,
-                        margin=dict(t=5, b=10, l=5, r=50),
-                    )
-                    st.plotly_chart(_fig_dem, use_container_width=True,
-                                    key="ref_dem_pred")
 
         # Trabajadores independientes (cuenta propia) se consideran empleados únicos
         p3069 = 1
