@@ -87,16 +87,22 @@ TAMANO_EMP = {
 }
 
 RAMA_CIIU = {
-    1:  "Agricultura/Pesca",       5:  "Minería",
-    10: "Industria manufacturera", 36: "Agua/Servicios",
-    41: "Construcción",            45: "Comercio/Vehículos",
-    49: "Transporte",              55: "Alojamiento/Restaurantes",
-    58: "Comunicaciones",          64: "Financiero",
-    68: "Inmobiliario",            75: "Veterinaria",
-    78: "Servicios adm.",          84: "Administración pública",
-    85: "Educación",               86: "Salud",
-    90: "Artes/Entretenimiento",   97: "Hogares con servicio dom.",
-    99: "Otro/NS",
+    1:  "Agricultura/Pesca",            5:  "Minería",
+    10: "Industria manufacturera",      14: "Confección/Textil",
+    25: "Productos metálicos",          36: "Agua/Servicios",
+    41: "Construcción",                 42: "Obras civiles",
+    43: "Construcción especializada",   45: "Comercio vehículos",
+    46: "Comercio al por mayor",        47: "Comercio al por menor",
+    49: "Transporte",                   52: "Almacenamiento/Apoyo transp.",
+    55: "Alojamiento",                  56: "Restaurantes/Comidas",
+    58: "Comunicaciones",               64: "Financiero",
+    68: "Inmobiliario",                 69: "Jurídico/Contabilidad",
+    75: "Veterinaria",                  78: "Servicios adm.",
+    81: "Servicios a edificios",        82: "Servicios de oficina",
+    84: "Administración pública",       85: "Educación",
+    86: "Salud",                        90: "Artes/Entretenimiento",
+    95: "Reparación equipos",           96: "Otros servicios personales",
+    97: "Hogares con servicio dom.",    99: "Otro/NS",
 }
 
 LABELS_EDU = {
@@ -314,7 +320,7 @@ if meta:
 
 st.divider()
 
-# ── Sidebar: configuración API ─────────────────────────────────────────────
+# ── Sidebar: configuración API + contexto de referencia ───────────────────
 with st.sidebar:
     st.markdown("## ⚙️ Configuración IA")
     st.caption(
@@ -332,6 +338,97 @@ with st.sidebar:
         st.success("API Key cargada — recomendaciones IA activas")
     else:
         st.info("Sin API Key — recomendaciones IA desactivadas")
+
+    # ── Contexto de referencia ─────────────────────────────────────────
+    _df_ref = load_data()
+    if _df_ref is not None:
+        st.markdown("---")
+        st.markdown("### 📊 Referencia: % informalidad por educación")
+        st.caption("Tasa ponderada GEIH 2024 · cuenta propia")
+        _labels_edu_ref = {
+            1:"Ninguno", 2:"Preescolar", 3:"Primaria inc.", 4:"Primaria",
+            5:"Sec. inc.", 6:"Secundaria", 7:"Media inc.", 8:"Media",
+            9:"Técnica", 10:"Universidad", 11:"Especializ.", 12:"Maestría", 13:"Doctorado",
+        }
+        if "P3042" in _df_ref.columns and "FEX_C18" in _df_ref.columns:
+            _tasa_edu_ref = (
+                _df_ref[_df_ref["P3042"].notna()]
+                .groupby("P3042", observed=True)
+                .apply(tasa_pond_grp, include_groups=False)
+                .reset_index().rename(columns={0: "tasa"})
+            )
+            _tasa_edu_ref["nivel"] = _tasa_edu_ref["P3042"].map(_labels_edu_ref)
+            _tasa_edu_ref["pct"]   = _tasa_edu_ref["tasa"].round(1)
+            _tasa_edu_ref = _tasa_edu_ref[_tasa_edu_ref["P3042"] <= 13].copy()
+            st.dataframe(
+                _tasa_edu_ref[["nivel", "pct"]]
+                    .rename(columns={"nivel": "Nivel educativo", "pct": "% Informal"})
+                    .reset_index(drop=True),
+                use_container_width=True, hide_index=True, height=290,
+            )
+
+        st.markdown("### 🌍 Referencia: % informalidad por demografía")
+        st.caption("Tasa ponderada · cuenta propia")
+
+        # Zona
+        if "CLASE" in _df_ref.columns:
+            _t_zona = (
+                _df_ref[_df_ref["CLASE"].notna()]
+                .groupby("CLASE", observed=True)
+                .apply(tasa_pond_grp, include_groups=False)
+                .reset_index().rename(columns={0: "tasa"})
+            )
+            _t_zona["zona"] = _t_zona["CLASE"].map({1: "Cabecera", 2: "Rural"})
+            _t_zona["pct"]  = _t_zona["tasa"].round(1)
+            st.markdown("**Por zona**")
+            st.dataframe(
+                _t_zona[["zona", "pct"]]
+                    .rename(columns={"zona": "Zona", "pct": "% Informal"})
+                    .reset_index(drop=True),
+                use_container_width=True, hide_index=True, height=90,
+            )
+
+        # Sexo
+        if "P3271" in _df_ref.columns:
+            _t_sexo = (
+                _df_ref[_df_ref["P3271"].notna()]
+                .groupby("P3271", observed=True)
+                .apply(tasa_pond_grp, include_groups=False)
+                .reset_index().rename(columns={0: "tasa"})
+            )
+            _t_sexo["sexo"] = _t_sexo["P3271"].map({1: "Hombre", 2: "Mujer"})
+            _t_sexo["pct"]  = _t_sexo["tasa"].round(1)
+            st.markdown("**Por sexo**")
+            st.dataframe(
+                _t_sexo[["sexo", "pct"]]
+                    .rename(columns={"sexo": "Sexo", "pct": "% Informal"})
+                    .reset_index(drop=True),
+                use_container_width=True, hide_index=True, height=90,
+            )
+
+        # Grupo de edad
+        if "P6040" in _df_ref.columns:
+            _df_ref2 = _df_ref[_df_ref["P6040"].notna()].copy()
+            _df_ref2["EDAD_G"] = pd.cut(
+                _df_ref2["P6040"],
+                bins=[14,24,34,44,54,64,120],
+                labels=["15-24","25-34","35-44","45-54","55-64","65+"]
+            )
+            _t_edad = (
+                _df_ref2[_df_ref2["EDAD_G"].notna()]
+                .groupby("EDAD_G", observed=True)
+                .apply(tasa_pond_grp, include_groups=False)
+                .reset_index().rename(columns={0: "tasa"})
+            )
+            _t_edad["pct"] = _t_edad["tasa"].round(1)
+            st.markdown("**Por grupo de edad**")
+            st.dataframe(
+                _t_edad[["EDAD_G", "pct"]]
+                    .rename(columns={"EDAD_G": "Edad", "pct": "% Informal"})
+                    .reset_index(drop=True),
+                use_container_width=True, hide_index=True, height=210,
+            )
+
     st.markdown("---")
     st.caption("Proyecto Final · Maestría · GEIH 2025")
 
@@ -428,15 +525,11 @@ with tab_dash:
         k3.metric("Formales",   f"{n_total-n_informal:,}",
                   f"{(n_total-n_informal)/n_total*100:.1f}% del total", delta_color="off")
 
-        # Paleta escala de grises: el color indica el grupo a resaltar, no el nivel de riesgo
-        # ── Paleta escala de grises ─────────────────────────────────────────
-        # Paleta
-        NEGRO  = "#222222"
-        GRIS_C = "#E0E0E0"
-
-        def _edu_gris(pct):
-            v = int(215 - (pct / 100) * 185)
-            return f"rgb({max(30,v)},{max(30,v)},{max(30,v)})"
+        def _semaforo(pct):
+            if pct >= tasa_global + 10: return "#C0392B"
+            elif pct >= tasa_global:    return "#E67E22"
+            elif pct >= tasa_global - 15: return "#F1C40F"
+            else:                       return "#27AE60"
 
         # ═══════════════════════════════════════════════════════════
         # ② EDUCACIÓN  +  ③ ZONA (como KPIs)
@@ -445,11 +538,6 @@ with tab_dash:
         col_edu, col_zona = st.columns([3, 2])
 
         with col_edu:
-            st.markdown("### Sin educación: 90% informal. Con universidad: menos de la mitad")
-            st.caption(
-                "El gradiente de gris sigue la informalidad: "
-                "barra oscura = alto riesgo · barra clara = bajo riesgo."
-            )
             tasa_edu = (
                 df[df["P3042"].notna()]
                 .groupby("P3042", observed=True)
@@ -458,16 +546,27 @@ with tab_dash:
             )
             tasa_edu["etiqueta"] = tasa_edu["P3042"].map(LABELS_EDU)
             tasa_edu["pct"]      = tasa_edu["tasa"].round(1)
+            _pct_ningu = float(tasa_edu.iloc[0]["pct"])
+            _univ_v    = tasa_edu.loc[tasa_edu["P3042"]==10, "pct"].values
+            _pct_univ  = float(_univ_v[0]) if len(_univ_v) else float(tasa_edu.iloc[-1]["pct"])
+            st.markdown(
+                f"### Sin educación: {_pct_ningu:.0f}% informal. "
+                f"Con universidad: {_pct_univ:.0f}% — "
+                f"{_pct_ningu - _pct_univ:.0f} pp de diferencia"
+            )
+            st.caption(
+                "🔴 Rojo = >10 pp sobre el promedio · "
+                "🟠 Naranja = sobre el promedio · "
+                "🟡 Amarillo = cerca del promedio · "
+                "🟢 Verde = bajo riesgo"
+            )
 
-            edu_texts = [
-                f"<b>{v:.0f}%</b>" if i in [0, len(tasa_edu)-1] else ""
-                for i, v in enumerate(tasa_edu["pct"])
-            ]
+            edu_texts = [f"<b>{v:.0f}%</b>" for v in tasa_edu["pct"]]
             fig_edu = go.Figure(go.Bar(
                 x=tasa_edu["etiqueta"], y=tasa_edu["pct"],
-                marker_color=[_edu_gris(v) for v in tasa_edu["pct"]],
+                marker_color=[_semaforo(v) for v in tasa_edu["pct"]],
                 text=edu_texts, textposition="outside",
-                textfont=dict(size=18, family="Arial Black, Arial Bold, Arial", color="#111111"),
+                textfont=dict(size=14, family="Arial Black, Arial Bold, Arial", color="#111111"),
             ))
             fig_edu.add_hline(y=tasa_global, line_dash="dot",
                               line_color="#888888", line_width=1.5,
@@ -482,7 +581,12 @@ with tab_dash:
                     showgrid=False,
                 ),
                 yaxis=dict(
+                    title=dict(
+                        text="% de trabajadores informales<br>según nivel educativo",
+                        font=dict(size=11, color="#555555"),
+                    ),
                     range=[0, 122], ticksuffix="%",
+                    showticklabels=False,
                     gridcolor="#F4F4F4", gridwidth=1, zeroline=False,
                     tickfont=dict(size=12, color="#777777"),
                 ),
@@ -491,19 +595,13 @@ with tab_dash:
             )
             st.plotly_chart(fig_edu, use_container_width=True, key="dash_edu")
 
-            pct_ningu = float(tasa_edu.iloc[0]["pct"])
-            univ_vals = tasa_edu.loc[tasa_edu["P3042"]==10, "pct"].values
-            pct_univ  = float(univ_vals[0]) if len(univ_vals) else float(tasa_edu.iloc[-1]["pct"])
             st.markdown(
-                f"> **Hallazgo:** Sin educación: **{pct_ningu:.0f}%** informal. "
-                f"Con universidad: **{pct_univ:.0f}%** — "
-                f"**{pct_ningu-pct_univ:.0f} pp** de diferencia."
+                f"> **Hallazgo:** Sin educación: **{_pct_ningu:.0f}%** informal. "
+                f"Con universidad: **{_pct_univ:.0f}%** — "
+                f"**{_pct_ningu - _pct_univ:.0f} pp** de diferencia."
             )
 
         with col_zona:
-            st.markdown("### Lo rural incrementa la informalidad")
-            st.caption("La zona geográfica amplifica todos los demás factores de riesgo.")
-
             t_zona = (
                 df[df["CLASE"].notna()]
                 .groupby("CLASE", observed=True)
@@ -514,13 +612,44 @@ with tab_dash:
             pct_cab = float(t_zona.loc[t_zona["CLASE"]==1, "pct"].values[0])
             pct_rur = float(t_zona.loc[t_zona["CLASE"]==2, "pct"].values[0])
             diferencia = pct_rur - pct_cab
+            st.markdown(
+                f"### Rural: {pct_rur:.0f}% informal. "
+                f"Cabecera: {pct_cab:.0f}% — {diferencia:.0f} pp de diferencia"
+            )
+            st.caption("La zona geográfica amplifica todos los demás factores de riesgo.")
 
-            # KPI: dos números grandes en lugar de gráfica
             z1, z2 = st.columns(2)
             z1.metric("Cabecera Municipal", f"{pct_cab:.1f}%")
             z2.metric("Rural", f"{pct_rur:.1f}%",
                       delta=f"+{diferencia:.0f} pp", delta_color="inverse")
-            st.markdown("<br>", unsafe_allow_html=True)
+
+            fig_zona = go.Figure(go.Bar(
+                x=["Cabecera", "Rural"],
+                y=[pct_cab, pct_rur],
+                marker_color=[_semaforo(pct_cab), _semaforo(pct_rur)],
+                text=[f"<b>{pct_cab:.1f}%</b>", f"<b>{pct_rur:.1f}%</b>"],
+                textposition="outside",
+                textfont=dict(size=18, family="Arial Black", color="#111111"),
+                width=[0.45, 0.45],
+            ))
+            fig_zona.add_hline(
+                y=tasa_global, line_dash="dot", line_color="#888888", line_width=1.5,
+                annotation_text=f"  promedio: {tasa_global:.0f}%",
+                annotation_position="top left",
+                annotation_font=dict(size=11, color="#666666"),
+                annotation_bgcolor="white",
+            )
+            fig_zona.update_layout(
+                yaxis=dict(range=[0, pct_rur + 20], ticksuffix="%",
+                           showticklabels=False,
+                           gridcolor="#F4F4F4", zeroline=False,
+                           tickfont=dict(size=12, color="#777777")),
+                xaxis=dict(showgrid=False, tickfont=dict(size=14, color="#111111")),
+                plot_bgcolor="white", paper_bgcolor="white",
+                height=260, showlegend=False,
+                margin=dict(t=15, b=20, l=55, r=15),
+            )
+            st.plotly_chart(fig_zona, use_container_width=True, key="dash_zona")
             st.markdown(
                 f"> **Hallazgo:** Vivir en zona rural incrementa la informalidad "
                 f"en **{diferencia:.0f} puntos porcentuales**, independientemente "
@@ -539,16 +668,22 @@ with tab_dash:
         )
 
         LABELS_RAMA_CORTO = {
-            1: "Agricultura / Pesca",   5: "Minería",
-            10: "Manufactura",          36: "Agua y servicios",
-            41: "Construcción",         45: "Comercio",
-            49: "Transporte",           55: "Restaurantes / Hoteles",
-            58: "Comunicaciones",       64: "Finanzas",
-            68: "Inmobiliario",         75: "Veterinaria",
-            78: "Servicios adm.",       84: "Adm. pública",
-            85: "Educación",            86: "Salud",
-            90: "Artes / Entretenimiento", 97: "Hogares c/serv. dom.",
-            99: "Otro / NS",
+            1:  "Agricultura / Pesca",       5:  "Minería",
+            10: "Manufactura",               14: "Confección / Textil",
+            25: "Productos metálicos",       36: "Agua y servicios",
+            41: "Construcción",              42: "Obras civiles",
+            43: "Constr. especializada",     45: "Comercio vehículos",
+            46: "Comercio al por mayor",     47: "Comercio al por menor",
+            49: "Transporte",                52: "Almacenamiento",
+            55: "Alojamiento",               56: "Restaurantes / Comidas",
+            58: "Comunicaciones",            64: "Finanzas",
+            68: "Inmobiliario",              69: "Jurídico / Contabilidad",
+            75: "Veterinaria",               78: "Servicios adm.",
+            81: "Servicios a edificios",     82: "Servicios de oficina",
+            84: "Adm. pública",              85: "Educación",
+            86: "Salud",                     90: "Artes / Entretenimiento",
+            95: "Reparación equipos",        96: "Otros serv. personales",
+            97: "Hogares c/serv. dom.",      99: "Otro / NS",
         }
         top_ramas = df["RAMA2D_R4"].value_counts().head(8).index
         tasa_rama = (
@@ -563,12 +698,10 @@ with tab_dash:
         tasa_rama["pct"] = tasa_rama["tasa"].round(1)
         n_r = len(tasa_rama)
 
-        # Solo top 3 oscuras — resto muy claro
-        rama_cols  = [NEGRO if i >= n_r - 3 else GRIS_C for i in range(n_r)]
-        # Solo etiqueta en las top 3
+        rama_cols  = [_semaforo(v) for v in tasa_rama["pct"]]
         rama_texts = [
-            f"<b>{v:.0f}%</b>" if i >= n_r - 3 else ""
-            for i, v in enumerate(tasa_rama["pct"])
+            f"<b>{v:.0f}%</b>" if _semaforo(v) in ("#C0392B", "#E67E22") else ""
+            for v in tasa_rama["pct"]
         ]
 
         fig_rama = go.Figure(go.Bar(
@@ -608,7 +741,85 @@ with tab_dash:
         )
 
         # ═══════════════════════════════════════════════════════════
-        # ⑤ CONCLUSIÓN — Estructura del riesgo
+        # ⑤ EDAD — curva en U
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        _bins_e   = [14, 24, 34, 44, 54, 64, 120]
+        _labs_e   = ["15–24", "25–34", "35–44", "45–54", "55–64", "65+"]
+        df_edad   = df[df["P6040"].notna()].copy()
+        df_edad["EDAD_GRUPO"] = pd.cut(df_edad["P6040"], bins=_bins_e, labels=_labs_e)
+        tasa_edad = (
+            df_edad[df_edad["EDAD_GRUPO"].notna()]
+            .groupby("EDAD_GRUPO", observed=True)
+            .apply(tasa_pond_grp, include_groups=False)
+            .reset_index().rename(columns={0: "tasa"})
+        )
+        tasa_edad["pct"]   = tasa_edad["tasa"].round(1)
+        tasa_edad["grupo"] = tasa_edad["EDAD_GRUPO"].astype(str)
+        _min_grupo = tasa_edad.loc[tasa_edad["pct"].idxmin(), "grupo"]
+        _max_grupo = tasa_edad.loc[tasa_edad["pct"].idxmax(), "grupo"]
+        _min_pct   = tasa_edad["pct"].min()
+        _max_pct   = tasa_edad["pct"].max()
+        st.markdown(
+            f"### {_max_grupo} años: {_max_pct:.0f}% informal. "
+            f"Menor riesgo en {_min_grupo} años con {_min_pct:.0f}%"
+        )
+        st.caption(
+            "Tasa de informalidad ponderada por grupo de edad. "
+            "El riesgo es mínimo en el grupo 25–34 y sube en los extremos — "
+            "los jóvenes por falta de experiencia y los mayores por desprotección estructural."
+        )
+
+        _marker_colors_edad = [_semaforo(v) for v in tasa_edad["pct"]]
+
+        fig_edad = go.Figure()
+        fig_edad.add_trace(go.Scatter(
+            x=tasa_edad["grupo"], y=tasa_edad["pct"],
+            mode="lines+markers+text",
+            line=dict(color="#888888", width=2.5),
+            marker=dict(
+                size=16, color=_marker_colors_edad,
+                line=dict(color="white", width=2),
+            ),
+            text=[f"<b>{v:.0f}%</b>" for v in tasa_edad["pct"]],
+            textposition="top center",
+            textfont=dict(size=13, family="Arial Black", color="#111111"),
+        ))
+        fig_edad.add_hline(
+            y=tasa_global, line_dash="dot", line_color="#888888", line_width=1.5,
+            annotation_text=f"  promedio: {tasa_global:.0f}%",
+            annotation_position="top left",
+            annotation_font=dict(size=11, color="#666666"),
+            annotation_bgcolor="white",
+        )
+        fig_edad.update_layout(
+            xaxis=dict(
+                title="<b>Grupo de edad</b>",
+                showgrid=False,
+                tickfont=dict(size=13, color="#111111"),
+            ),
+            yaxis=dict(
+                range=[0, max(tasa_edad["pct"]) + 18],
+                ticksuffix="%",
+                showticklabels=False,
+                gridcolor="#F4F4F4", zeroline=False,
+                tickfont=dict(size=12, color="#777777"),
+            ),
+            plot_bgcolor="white", paper_bgcolor="white",
+            height=340, showlegend=False,
+            margin=dict(t=30, b=50, l=55, r=20),
+        )
+        st.plotly_chart(fig_edad, use_container_width=True, key="dash_edad")
+
+        st.markdown(
+            f"> **Hallazgo:** El grupo de menor riesgo es **{_min_grupo}** ({_min_pct:.0f}%), "
+            f"mientras que **{_max_grupo}** alcanza **{_max_pct:.0f}%** — "
+            f"una diferencia de **{_max_pct - _min_pct:.0f} pp**. "
+            "Los programas del SENA deberían priorizar los extremos de la curva."
+        )
+
+        # ═══════════════════════════════════════════════════════════
+        # ⑥ CONCLUSIÓN — Estructura del riesgo
         # ═══════════════════════════════════════════════════════════
         st.divider()
         st.markdown("### El riesgo de informalidad está determinado por condiciones estructurales")
@@ -1036,12 +1247,33 @@ with tab_pred:
     if model is None or preprocessor is None:
         st.error("Carga el modelo ejecutando `4.Modelamiento.ipynb` primero.")
     else:
-        col_l, col_r = st.columns(2)
+        col_l, col_r, col_ref = st.columns([4, 4, 5])
 
         with col_l:
             st.markdown("**Datos demográficos**")
             edad      = st.slider("Edad (años)", 15, 75, 35)
             anios_edu = st.slider("Años de educación acumulados", 0, 25, 9)
+            # Labels de referencia debajo del slider
+            st.markdown(
+                """<div style="display:flex;justify-content:space-between;
+                            font-size:0.72rem;color:#888;margin-top:-14px;
+                            margin-bottom:6px;padding:0 2px">
+                    <span>Ninguno<br><b style='color:#555'>0</b></span>
+                    <span style="text-align:center">Primaria<br><b style='color:#555'>5</b></span>
+                    <span style="text-align:center">Bachillerato<br><b style='color:#555'>11</b></span>
+                    <span style="text-align:center">Técnica<br><b style='color:#555'>14</b></span>
+                    <span style="text-align:center">Univer.<br><b style='color:#555'>16</b></span>
+                    <span style="text-align:right">Doctorado<br><b style='color:#555'>21</b></span>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            # Nivel dinámico según valor actual
+            _edu_ref = [(0,"Ninguno"),(1,"Preescolar"),(3,"Primaria inc."),
+                        (5,"Primaria"),(7,"Sec. incompleta"),(9,"Secundaria"),
+                        (10,"Media inc."),(11,"Bachillerato"),(14,"Técnica/Tecnológica"),
+                        (16,"Universidad"),(17,"Especialización"),(18,"Maestría"),(21,"Doctorado")]
+            _nivel_edu = next(n for u, n in reversed(_edu_ref) if anios_edu >= u)
+            st.caption(f"Nivel: **{_nivel_edu}**")
             sexo_lbl  = st.selectbox("Sexo", ["Hombre", "Mujer"])
             p3271     = 1 if sexo_lbl == "Hombre" else 2
             ecivil_lbl = st.selectbox("Estado civil", list(ESTADO_CIVIL.values()))
@@ -1058,6 +1290,124 @@ with tab_pred:
             rama      = {v: k for k, v in RAMA_CIIU.items()}[rama_lbl]
             pluriemp  = st.checkbox("¿Tiene otro trabajo adicional (pluriempleo)?", value=False)
             p7040_val = 1 if pluriemp else 0
+
+        with col_ref:
+            if df is not None:
+                _ref_semaforo = lambda v, ref: (
+                    "#C0392B" if v >= ref + 10 else
+                    "#E67E22" if v >= ref else
+                    "#F1C40F" if v >= ref - 15 else "#27AE60"
+                )
+                _tasa_ref = (df["INFORMAL"] * df["FEX_C18"]).sum() / df["FEX_C18"].sum() * 100
+
+                # ── Gráfica 1: % informalidad según educación ────────────
+                st.markdown("**% informalidad según educación**")
+                _lbl_edu = {
+                    1:"Ninguno", 2:"Preescolar", 3:"Primaria inc.", 4:"Primaria",
+                    5:"Sec. inc.", 6:"Secundaria", 7:"Media inc.", 8:"Media",
+                    9:"Técnica", 10:"Universidad", 11:"Especializ.",
+                    12:"Maestría", 13:"Doctorado",
+                }
+                if "P3042" in df.columns:
+                    _te = (
+                        df[df["P3042"].notna()]
+                        .groupby("P3042", observed=True)
+                        .apply(tasa_pond_grp, include_groups=False)
+                        .reset_index().rename(columns={0: "tasa"})
+                    )
+                    _te["etiq"] = _te["P3042"].map(_lbl_edu)
+                    _te["pct"]  = _te["tasa"].round(1)
+                    _te = _te[_te["P3042"] <= 13].copy()
+
+                    _fig_edu_ref = go.Figure(go.Bar(
+                        y=_te["etiq"], x=_te["pct"],
+                        orientation="h",
+                        marker_color=[_ref_semaforo(v, _tasa_ref) for v in _te["pct"]],
+                        text=[f"<b>{v:.0f}%</b>" for v in _te["pct"]],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#111111"),
+                    ))
+                    _fig_edu_ref.add_vline(
+                        x=_tasa_ref, line_dash="dot", line_color="#888",
+                        line_width=1.5,
+                    )
+                    _fig_edu_ref.update_layout(
+                        xaxis=dict(range=[0, 120], ticksuffix="%",
+                                   showgrid=False, zeroline=False,
+                                   tickfont=dict(size=9, color="#777")),
+                        yaxis=dict(tickfont=dict(size=10, color="#111"),
+                                   showgrid=False),
+                        plot_bgcolor="white", paper_bgcolor="white",
+                        height=320, showlegend=False,
+                        margin=dict(t=5, b=10, l=5, r=50),
+                    )
+                    st.plotly_chart(_fig_edu_ref, use_container_width=True,
+                                    key="ref_edu_pred")
+
+                # ── Gráfica 2: % informalidad según demografía ───────────
+                st.markdown("**% informalidad según demografía**")
+                _demog_labels, _demog_vals = [], []
+
+                if "CLASE" in df.columns:
+                    for _c, _n in [(1, "Cabecera"), (2, "Rural")]:
+                        _sub = df[df["CLASE"] == _c]
+                        if len(_sub):
+                            _demog_labels.append(_n)
+                            _demog_vals.append(
+                                (_sub["INFORMAL"]*_sub["FEX_C18"]).sum()
+                                / _sub["FEX_C18"].sum() * 100
+                            )
+
+                if "P3271" in df.columns:
+                    for _s, _n in [(1, "Hombre"), (2, "Mujer")]:
+                        _sub = df[df["P3271"] == _s]
+                        if len(_sub):
+                            _demog_labels.append(_n)
+                            _demog_vals.append(
+                                (_sub["INFORMAL"]*_sub["FEX_C18"]).sum()
+                                / _sub["FEX_C18"].sum() * 100
+                            )
+
+                if "P6040" in df.columns:
+                    _df_e = df[df["P6040"].notna()].copy()
+                    _df_e["EG"] = pd.cut(_df_e["P6040"],
+                                         bins=[14,24,34,44,54,64,120],
+                                         labels=["15-24","25-34","35-44",
+                                                 "45-54","55-64","65+"])
+                    for _g in ["15-24","25-34","35-44","45-54","55-64","65+"]:
+                        _sub = _df_e[_df_e["EG"].astype(str) == _g]
+                        if len(_sub):
+                            _demog_labels.append(_g)
+                            _demog_vals.append(
+                                (_sub["INFORMAL"]*_sub["FEX_C18"]).sum()
+                                / _sub["FEX_C18"].sum() * 100
+                            )
+
+                if _demog_labels:
+                    _fig_dem = go.Figure(go.Bar(
+                        y=_demog_labels, x=[round(v, 1) for v in _demog_vals],
+                        orientation="h",
+                        marker_color=[_ref_semaforo(v, _tasa_ref) for v in _demog_vals],
+                        text=[f"<b>{v:.0f}%</b>" for v in _demog_vals],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#111111"),
+                    ))
+                    _fig_dem.add_vline(
+                        x=_tasa_ref, line_dash="dot", line_color="#888",
+                        line_width=1.5,
+                    )
+                    _fig_dem.update_layout(
+                        xaxis=dict(range=[0, 120], ticksuffix="%",
+                                   showgrid=False, zeroline=False,
+                                   tickfont=dict(size=9, color="#777")),
+                        yaxis=dict(tickfont=dict(size=10, color="#111"),
+                                   showgrid=False),
+                        plot_bgcolor="white", paper_bgcolor="white",
+                        height=280, showlegend=False,
+                        margin=dict(t=5, b=10, l=5, r=50),
+                    )
+                    st.plotly_chart(_fig_dem, use_container_width=True,
+                                    key="ref_dem_pred")
 
         # Trabajadores independientes (cuenta propia) se consideran empleados únicos
         p3069 = 1
