@@ -175,7 +175,7 @@ def tasa_pond_grp(g):
 
 # ── Helper: construir input para el preprocessor ─────────────────────────
 def construir_input(p6040, p3271, p6070, clase, dpto,
-                    p6800, p3069, rama,
+                    p6800, rama,
                     anios_edu, pluriempleo):
     """Construye el vector de entrada para el modelo de trabajadores independientes.
     El modelo fue entrenado exclusivamente sobre P6430 == 4 (Cuenta propia).
@@ -195,10 +195,7 @@ def construir_input(p6040, p3271, p6070, clase, dpto,
         "CLASE":        clase,
         "DPTO":         dpto,
         "P6800":        p6800,
-        "P6450":        9,       # NS/NR — oculto; excluida de próxima versión del modelo
-        "P3069":        p3069,
         "RAMA2D_R4":    rama,
-        "MICROEMPRESA": int(p3069 in [1, 2, 3]),
         "SUBEMPLEADO":  int(p6800 < 32),
         "PLURIEMPLEO":  pluriempleo,
     }
@@ -346,11 +343,11 @@ with st.sidebar:
 # TABS
 # ══════════════════════════════════════════════════════════════════════════
 tab_arq, tab_dash, tab_dpto, tab_modelo, tab_pred = st.tabs([
-    "🏛️ Arquitectura & Pipeline",
-    "📊 ¿Por qué permanecen informales?",
-    "🗺️ Informalidad por departamento",
-    "📈 Desempeño del Modelo",
-    "🔮 Predicción Individual",
+    "Arquitectura & Pipeline",
+    "¿Por qué permanecen informales?",
+    "Informalidad por departamento",
+    "Desempeño del Modelo",
+    "Predicción Individual",
 ])
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -984,7 +981,6 @@ with tab_modelo:
                 "P6800": "Horas / semana",
                 "P3271": "Sexo",
                 "CLASE": "Zona (urbana/rural)",
-                "MICROEMPRESA": "Microempresa (≤10 p.)",
                 "SUBEMPLEADO": "Subempleado (<32 h)",
                 "PLURIEMPLEO": "Pluriempleo",
                 "0": "Rama de actividad",
@@ -1001,19 +997,6 @@ with tab_modelo:
                 "P6070_4.0": "Civil: Separado/a",
                 "P6070_5.0": "Civil: Viudo/a",
                 "P6070_6.0": "Civil: NS/NR",
-                "P6450_1.0": "Contrato: Verbal",
-                "P6450_2.0": "Contrato: Escrito",
-                "P6450_9.0": "Contrato: NS/NR",
-                "P3069_1":  "Establ. 1 persona",
-                "P3069_2":  "Establ. 2–5 p.",
-                "P3069_3":  "Establ. 6–10 p.",
-                "P3069_4":  "Establ. 11–19 p.",
-                "P3069_5":  "Establ. 20–30 p.",
-                "P3069_6":  "Establ. 31–50 p.",
-                "P3069_7":  "Establ. 51–100 p.",
-                "P3069_8":  "Establ. 101–200 p.",
-                "P3069_9":  "Establ. 201+ p.",
-                "P3069_10": "Establ. tamaño NS",
             }
             feat_raw   = meta.get("feature_names", [])
             feat_label = [_NOM.get(n, n) for n in feat_raw]
@@ -1050,7 +1033,7 @@ with tab_modelo:
         _NOMB = {
             "P6040": "Edad", "ANIOS_EDU": "Años de educación",
             "P6800": "Horas / semana", "P3271": "Sexo",
-            "CLASE": "Zona (urbana/rural)", "MICROEMPRESA": "Microempresa (≤10 p.)",
+            "CLASE": "Zona (urbana/rural)",
             "SUBEMPLEADO": "Subempleado (<32 h)", "PLURIEMPLEO": "Pluriempleo",
             "0": "Rama de actividad", "1": "Departamento",
             "EDAD_GRUPO_15-24": "Edad: 15–24", "EDAD_GRUPO_25-34": "Edad: 25–34",
@@ -1059,13 +1042,6 @@ with tab_modelo:
             "P6070_1.0": "Civil: No unido/a", "P6070_2.0": "Civil: Unión libre",
             "P6070_3.0": "Civil: Casado/a",   "P6070_4.0": "Civil: Separado/a",
             "P6070_5.0": "Civil: Viudo/a",     "P6070_6.0": "Civil: NS/NR",
-            "P6450_1.0": "Contrato: Verbal",   "P6450_2.0": "Contrato: Escrito",
-            "P6450_9.0": "Contrato: NS/NR",
-            "P3069_1": "Establ. 1 persona",    "P3069_2":  "Establ. 2–5 p.",
-            "P3069_3": "Establ. 6–10 p.",      "P3069_4":  "Establ. 11–19 p.",
-            "P3069_5": "Establ. 20–30 p.",     "P3069_6":  "Establ. 31–50 p.",
-            "P3069_7": "Establ. 51–100 p.",    "P3069_8":  "Establ. 101–200 p.",
-            "P3069_9": "Establ. 201+ p.",      "P3069_10": "Establ. tamaño NS",
         }
         _bee = compute_shap_beeswarm()
         if _bee is not None:
@@ -1212,12 +1188,9 @@ with tab_pred:
             p7040_val = 1 if pluriemp else 0
 
 
-        # Trabajadores independientes (cuenta propia) se consideran empleados únicos
-        p3069 = 1
-
         input_raw = construir_input(
             p6040=edad,  p3271=p3271,  p6070=p6070,  clase=clase,  dpto=dpto,
-            p6800=p6800, p3069=p3069,  rama=rama,
+            p6800=p6800,  rama=rama,
             anios_edu=anios_edu, pluriempleo=p7040_val,
         )
 
