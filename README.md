@@ -39,7 +39,7 @@ Proyecto_Final_maestria/
 ├── app.py                              ← Dashboard Streamlit (5 tabs)
 ├── requirements.txt                    ← Dependencias Python
 ├── informe_final.tex                   ← Documento de entrega (LaTeX)
-├── geih_2024.duckdb                    ← Base de datos DuckDB
+├── geih_2025.duckdb                    ← Base de datos DuckDB
 │
 ├── 1.Ingesta.ipynb                     ← Fase 1: carga y unión de módulos GEIH
 ├── 2.EDA.ipynb                         ← Fase 2: análisis exploratorio
@@ -49,7 +49,7 @@ Proyecto_Final_maestria/
 │
 ├── parquet/                            ← Artefactos del pipeline
 │   ├── preprocessor.joblib             ← Pipeline ColumnTransformer serializado
-│   └── geih_2024_crudo.parquet         ← Dataset crudo (generado por notebook 1)
+│   └── geih_2025_crudo.parquet         ← Dataset crudo (generado por notebook 1)
 │
 ├── outputs/                            ← Artefactos del modelo (en el repo)
 │   ├── champion_geih.pkl               ← Modelo LightGBM serializado (48 MB)
@@ -61,7 +61,7 @@ Proyecto_Final_maestria/
 │   ├── shap_summary.png
 │   └── shap_importance.png
 │
-└── 2024_data/                          ← Datos crudos GEIH (NO en GitHub)
+└── 2025_data/                          ← Datos crudos GEIH (NO en GitHub)
     ├── Caracteristicas_Generales/      ← 12 CSV mensuales
     └── Ocupados/                       ← 12 CSV mensuales
 ```
@@ -170,10 +170,10 @@ groq>=0.9.0
 
 ## Fuente de datos
 
-**[DANE — Gran Encuesta Integrada de Hogares 2024](https://microdatos.dane.gov.co/index.php/catalog/819)**
+**[DANE — Gran Encuesta Integrada de Hogares 2025](https://microdatos.dane.gov.co/index.php/catalog/853)**
 
 Los archivos CSV crudos no están en el repositorio (~180 MB sin comprimir). Módulos necesarios:
-- **Características Generales** → `2024_data/Caracteristicas_Generales/`
-- **Ocupados** → `2024_data/Ocupados/`
+- **Características Generales** → `2025_data/Caracteristicas_Generales/`
+- **Ocupados** → `2025_data/Ocupados/`
 
 > El DANE no avala los resultados del análisis.
