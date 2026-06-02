@@ -1,4 +1,4 @@
-# Predicción de Informalidad Laboral en Colombia · GEIH 2024
+# Predicción de Informalidad Laboral en Colombia · GEIH 2025
 
 **Maestría en Ciencia de Datos y Analítica** · SI7006 · SI7007 · SI7009  
 Juan Andrés Montoya · Julián David Mejía
